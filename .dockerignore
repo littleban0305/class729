@@ -1,0 +1,15 @@
+.git
+.gitignore
+.idea
+.vscode
+.dart_tool
+.packages
+.pub
+build
+coverage
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+*.iml
+.DS_Store
+Thumbs.db

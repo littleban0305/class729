@@ -1,0 +1,209 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:class_729/app_state.dart';
+import 'package:class_729/firebase_options.dart';
+import 'package:class_729/main.dart';
+import 'package:class_729/models.dart';
+import 'package:class_729/services/cloud_sync_service.dart';
+
+void main() {
+  testWidgets('729 app renders', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pump();
+
+    expect(find.text('729'), findsWidgets);
+    expect(find.text('這台裝置要作為什麼用途？'), findsOneWidget);
+  });
+
+  test('a reminder can be active during any configured time range', () {
+    final reminder = ReminderData(
+      title: '課間提醒',
+      content: '請準備下一節課',
+      date: '',
+      startTime: '08:00',
+      endTime: '08:10',
+      timeRanges: [
+        ReminderTimeRange(startTime: '08:00', endTime: '08:10'),
+        ReminderTimeRange(startTime: '12:00', endTime: '12:30'),
+      ],
+    );
+
+    expect(reminder.isActiveAt(DateTime(2026, 9, 17, 8, 5)), isTrue);
+    expect(reminder.isActiveAt(DateTime(2026, 9, 17, 12, 15)), isTrue);
+    expect(reminder.isActiveAt(DateTime(2026, 9, 17, 10, 0)), isFalse);
+  });
+
+  test('each time range applies its own weekday or calendar rule', () {
+    final reminder = ReminderData(
+      title: '分段規則',
+      content: '',
+      date: '',
+      startTime: '08:00',
+      endTime: '09:00',
+      timeRanges: [
+        ReminderTimeRange(
+          startTime: '08:00',
+          endTime: '09:00',
+          repeatType: 'weekly',
+          weekdays: [1, 3],
+        ),
+        ReminderTimeRange(
+          startTime: '12:00',
+          endTime: '13:00',
+          repeatType: 'specific',
+          dates: ['2026-09-17'],
+        ),
+      ],
+    );
+
+    expect(reminder.isActiveAt(DateTime(2026, 9, 14, 8, 30)), isTrue);
+    expect(reminder.isActiveAt(DateTime(2026, 9, 15, 8, 30)), isFalse);
+    expect(reminder.isActiveAt(DateTime(2026, 9, 17, 12, 30)), isTrue);
+    expect(reminder.isActiveAt(DateTime(2026, 9, 18, 12, 30)), isFalse);
+  });
+
+  test('class reminders trigger auto evaluation when the end time is reached', () {
+    final reminder = ReminderData(
+      title: '數學課',
+      content: '分數與圖形',
+      date: '',
+      startTime: '08:00',
+      endTime: '08:40',
+      lessonType: 'class',
+      autoEvaluationEnabled: true,
+    );
+
+    expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 30)), isFalse);
+    expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 40)), isTrue);
+    expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 41)), isTrue);
+  });
+
+  test('teacher password remains intact when private snapshot merges across devices', () {
+    final merged = CloudSyncService.mergePrivateState(
+      existing: {
+        'teacherPassword': 'OldSecret123',
+        'reminders': [
+          {'title': 'existing'},
+        ],
+      },
+      incoming: {
+        'reminders': [
+          {'title': 'new'},
+        ],
+      },
+    );
+
+    expect(merged['teacherPassword'], 'OldSecret123');
+    expect(merged['reminders'], isA<List>());
+    expect(merged['reminders'][0]['title'], 'new');
+  });
+
+  test('firebase options are available for macOS so cloud sync can initialize', () {
+    final options = DefaultFirebaseOptions.forPlatform(TargetPlatform.macOS);
+
+    expect(options.projectId, 'class-729-app');
+    expect(options.appId, isNotEmpty);
+    expect(options.apiKey, isNotEmpty);
+  });
+
+  test('public cloud data applies the preview test time across devices', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.testNow = null;
+
+    await state.applyPublicCloudData({
+      'testNow': '2026-09-17T12:30:00.000',
+      'reminders': <Map<String, dynamic>>[],
+      'seats': <Map<String, dynamic>>[],
+      'diaryEntries': <Map<String, dynamic>>[],
+      'scheduleEntries': <Map<String, dynamic>>[],
+      'attendanceToday': <Map<String, dynamic>>[],
+    });
+
+    expect(state.testNow, isNotNull);
+    expect(state.testNow!.toIso8601String(), '2026-09-17T12:30:00.000');
+  });
+
+  test('public attendance snapshots keep the exact sign-in time', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    await state.applyPublicCloudData({
+      'testNow': null,
+      'reminders': <Map<String, dynamic>>[],
+      'seats': <Map<String, dynamic>>[],
+      'diaryEntries': <Map<String, dynamic>>[],
+      'scheduleEntries': <Map<String, dynamic>>[],
+      'attendanceToday': [
+        {
+          'studentNumber': '1',
+          'studentName': '小明',
+          'date': '2026-09-20',
+          'time': '07:42:15',
+          'late': false,
+        }
+      ],
+    });
+
+    expect(state.attendanceRecords, isNotEmpty);
+    expect(state.attendanceRecords.first.time, '07:42:15');
+    expect(state.attendanceRecords.first.late, isFalse);
+  });
+
+  test('seat score can be adjusted by adding and subtracting points', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.seats = [
+      SeatData(number: '1', name: '小明', row: 0, slot: 0, score: 3),
+    ];
+
+    await state.adjustSeatScore(0, 5);
+    expect(state.seats[0].score, 8);
+
+    await state.adjustSeatScore(0, -3);
+    expect(state.seats[0].score, 5);
+  });
+
+  test('reminder element rotation is preserved through copy and JSON conversion', () {
+    final element = ReminderElementData(
+      id: 'rotated-text',
+      type: 'text',
+      text: '轉啊轉',
+      x: 120,
+      y: 80,
+      width: 220,
+      height: 70,
+      rotation: 32,
+    );
+
+    final recreated = ReminderElementData.fromJson(element.toJson());
+
+    expect(element.rotation, 32);
+    expect(recreated.rotation, 32);
+    expect(element.copyWith(rotation: 90).rotation, 90);
+  });
+
+  test('text element preserves line breaks in the stored content', () {
+    final element = ReminderElementData(
+      id: 'multiline-text',
+      type: 'text',
+      text: '第一行\n第二行\n第三行',
+      x: 50,
+      y: 50,
+      width: 200,
+      height: 80,
+    );
+
+    final roundTrip = ReminderElementData.fromJson(element.toJson());
+
+    expect(roundTrip.text, '第一行\n第二行\n第三行');
+    expect(element.copyWith(text: 'A\nB').text, 'A\nB');
+  });
+}

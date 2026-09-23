@@ -11,12 +11,17 @@ coverage/
 *.iml
 .DS_Store
 Thumbs.db
+*.log
 
-# Firebase / local secret files
+work/
+android/.kotlin/
+windows/flutter/generated_plugin_registrant.*
+windows/flutter/generated_plugins.cmake
+macos/Flutter/GeneratedPluginRegistrant.swift
+
 functions/class-729-app-firebase-adminsdk-fbsvc-67f7690e0d.json
 functions/.env
 functions/.env.*
 !functions/.env.example
+
 **/node_modules/
-package-lock.json
-functions/package-lock.json

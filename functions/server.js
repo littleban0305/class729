@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 3000;
 const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 const LINE_SECRET = process.env.LINE_CHANNEL_SECRET || '';
 const DEFAULT_CLASS_ID = (process.env.LINE_DEFAULT_CLASS_ID || process.env.CLASS_ID || '729').trim();
+const LINE_USER_COLLECTION = 'lineUsers';
 const DAY_NAMES = ['一', '二', '三', '四', '五', '六', '日'];
 
 const ARG_COMMANDS = [
@@ -25,7 +26,6 @@ const KEYWORDS = [
     { key: ['查看分數', '分數', 'score', 'grades'], type: 'score' },
     { key: ['查看今日簽到時間', '今日簽到時間', '簽到時間', 'attendance'], type: 'attendance' },
     { key: ['查看被記', '被記', '記錄', 'late', '登記'], type: 'discipline' },
-    { key: ['你好', 'hi', 'hello', '哈囉'], reply: '您好，歡迎使用 729 班級助手。輸入「指令清單」即可查看可用指令。' },
 ];
 
 function normalizeText(value) {
@@ -140,9 +140,7 @@ function toPlainLine(value) {
     return String(value).replace(/\s+/g, ' ').trim();
 }
 
-function buildReplyTextForData(type, data, classId) {
-    const classLabel = classId ? `班級 ${classId}` : '班級資料';
-
+function buildReplyTextForData(type, data, classId, studentNumber = '') {
     if (type === 'schedule') {
         const entries = asArray(data?.scheduleEntries)
             .filter((entry) => entry && typeof entry === 'object')
@@ -157,7 +155,7 @@ function buildReplyTextForData(type, data, classId) {
             .sort((a, b) => a.weekday - b.weekday || a.lesson - b.lesson);
 
         if (!entries.length) {
-            return `${classLabel} 目前沒有課表資料，請先在 729 軟體中同步課表。`;
+            return '目前沒有課表資料，請先在 729 軟體中同步課表。';
         }
 
         const today = new Date();
@@ -165,10 +163,10 @@ function buildReplyTextForData(type, data, classId) {
         const todayLessons = entries.filter((entry) => entry.weekday === weekdayIndex);
 
         if (!todayLessons.length) {
-            return `${classLabel} 今天沒有排課；目前可用課表：\n${entries.slice(0, 3).map((entry) => `星期${DAY_NAMES[entry.weekday] || entry.weekday + 1} 第${entry.lesson + 1}節 ${entry.subject || '未命名'}`).join('\n')}`;
+            return `今天沒有排課；目前可用課表：\n${entries.slice(0, 3).map((entry) => `星期${DAY_NAMES[entry.weekday] || entry.weekday + 1} 第${entry.lesson + 1}節 ${entry.subject || '未命名'}`).join('\n')}`;
         }
 
-        return `${classLabel} 今天的課表：\n${todayLessons.map((entry) => `第${entry.lesson + 1}節 ${entry.subject || '未命名'}${entry.teacher ? ` (${entry.teacher})` : ''}${entry.startTime && entry.endTime ? ` ${entry.startTime}-${entry.endTime}` : ''}`).join('\n')}`;
+        return `今天的課表：\n${todayLessons.map((entry) => `第${entry.lesson + 1}節 ${entry.subject || '未命名'}${entry.teacher ? ` (${entry.teacher})` : ''}${entry.startTime && entry.endTime ? ` ${entry.startTime}-${entry.endTime}` : ''}`).join('\n')}`;
     }
 
     if (type === 'diary') {
@@ -180,19 +178,21 @@ function buildReplyTextForData(type, data, classId) {
             return '今天沒有聯絡簿內容。';
         }
 
-        return `今日聯絡簿：\n${todayEntries.map((entry, index) => `${index + 1}. ${entry.content || '無內容'}（${entry.tag || '一般'}）`).join('\n')}`;
+        return `今天的聯絡簿：\n${todayEntries.map((entry, index) => `${index + 1}. ${entry.content || '無內容'}（${entry.tag || '一般'}）`).join('\n')}`;
     }
 
     if (type === 'score') {
-        const seats = asArray(data?.seats)
+        const allSeats = asArray(data?.seats)
             .filter((entry) => entry && typeof entry === 'object')
             .map((entry) => ({
                 number: toPlainLine(entry.number),
                 name: toPlainLine(entry.name),
                 score: Number(entry.score ?? 0),
             }))
-            .filter((entry) => entry.number || entry.name || entry.score !== 0)
-            .slice(0, 5);
+            .filter((entry) => entry.number || entry.name || entry.score !== 0);
+        const seats = studentNumber
+            ? allSeats.filter((entry) => entry.number === studentNumber).slice(0, 1)
+            : allSeats.slice(0, 5);
 
         const cleanliness = asArray(data?.cleanlinessRecords)
             .filter((entry) => entry && typeof entry === 'object')
@@ -204,14 +204,14 @@ function buildReplyTextForData(type, data, classId) {
             .slice(0, 3);
 
         if (seats.length) {
-            return `${classLabel} 的分數資料：\n${seats.map((entry) => `${entry.number || entry.name || '座位'}：${entry.score}`).join('\n')}`;
+            return `分數資料：\n${seats.map((entry) => `${entry.number || entry.name || '座位'}：${entry.score}`).join('\n')}`;
         }
 
         if (cleanliness.length) {
-            return `${classLabel} 的整潔分數：\n${cleanliness.map((entry) => `${entry.studentName || '學生'}：${entry.score} 分（${entry.area || '教室'}）`).join('\n')}`;
+            return `整潔分數：\n${cleanliness.map((entry) => `${entry.studentName || '學生'}：${entry.score} 分（${entry.area || '教室'}）`).join('\n')}`;
         }
 
-        return `${classLabel} 目前沒有可查詢的分數資料。`;
+        return '目前沒有可查詢的分數資料。';
     }
 
     if (type === 'attendance') {
@@ -229,31 +229,34 @@ function buildReplyTextForData(type, data, classId) {
             .slice(0, 5);
 
         if (!records.length) {
-            return `${classLabel} 今天還沒有簽到紀錄。`;
+            return '今天還沒有簽到紀錄。';
         }
 
-        return `${classLabel} 今日簽到：\n${records.map((entry) => `${entry.studentName || entry.studentNumber || '學生'} ${entry.time}${entry.late ? '（遲到）' : ''}`).join('\n')}`;
+        return `今日簽到：\n${records.map((entry) => `${entry.studentName || entry.studentNumber || '學生'} ${entry.time}${entry.late ? '（遲到）' : ''}`).join('\n')}`;
     }
 
     if (type === 'discipline') {
-        const records = asArray(data?.studentRecords)
+        const allRecords = asArray(data?.studentRecords)
             .filter((entry) => entry && typeof entry === 'object')
             .map((entry) => ({
+                studentNumber: toPlainLine(entry.studentNumber),
                 studentName: toPlainLine(entry.studentName),
                 date: toPlainLine(entry.date),
                 type: toPlainLine(entry.type),
                 note: toPlainLine(entry.note),
-            }))
-            .slice(0, 3);
+            }));
+        const records = (studentNumber
+            ? allRecords.filter((entry) => entry.studentNumber === studentNumber)
+            : allRecords).slice(0, 3);
 
         if (!records.length) {
-            return `${classLabel} 目前沒有被記紀錄。`;
+            return '目前沒有被記紀錄。';
         }
 
-        return `${classLabel} 的被記紀錄：\n${records.map((entry) => `${entry.studentName || '學生'} ${entry.date}：${entry.type || '紀錄'}${entry.note ? ` / ${entry.note}` : ''}`).join('\n')}`;
+        return `被記紀錄：\n${records.map((entry) => `${entry.studentName || '學生'} ${entry.date}：${entry.type || '紀錄'}${entry.note ? ` / ${entry.note}` : ''}`).join('\n')}`;
     }
 
-    return `${classLabel} 沒有對應資料。`;
+    return '沒有對應資料。';
 }
 
 function initFirebase() {
@@ -275,6 +278,30 @@ function initFirebase() {
     }
 
     return admin.firestore();
+}
+
+async function getLineUserProfile(userId) {
+    if (!userId) return null;
+
+    const db = initFirebase();
+    const snapshot = await db.collection(LINE_USER_COLLECTION).doc(userId).get();
+    return snapshot.exists ? snapshot.data() || {} : null;
+}
+
+async function saveLineUserProfile(userId, data) {
+    if (!userId) {
+        throw new Error('LINE 使用者識別失敗，無法儲存座號。');
+    }
+
+    const db = initFirebase();
+    await db.collection(LINE_USER_COLLECTION).doc(userId).set({
+        ...data,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+}
+
+function isValidStudentNumber(value) {
+    return /^\d{1,3}$/.test(normalizeText(value));
 }
 
 async function fetchClassData(classId) {
@@ -321,10 +348,23 @@ async function fetchClassData(classId) {
     }
 }
 
-async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID) {
+async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = null) {
     const text = normalizeText(message);
     if (!text) {
-        return '請輸入關鍵字，例如：指令清單、查看課表、查看聯絡簿。';
+        return null;
+    }
+
+    const profile = userId ? await getLineUserProfile(userId) : null;
+    if (profile?.awaitingStudentNumber) {
+        if (!isValidStudentNumber(text)) {
+            return '錯誤，請輸入你的座號，例如30號填寫30。';
+        }
+
+        await saveLineUserProfile(userId, {
+            studentNumber: text,
+            awaitingStudentNumber: false,
+        });
+        return `已記住你的座號 ${text}。`;
     }
 
     const normalized = text.toLowerCase();
@@ -335,17 +375,27 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID) {
                 return item.reply;
             }
 
+            let studentNumber = '';
+            if (item.type === 'score' || item.type === 'discipline') {
+                studentNumber = toPlainLine(profile?.studentNumber);
+
+                if (!studentNumber) {
+                    await saveLineUserProfile(userId, { awaitingStudentNumber: true });
+                    return '請問你是幾號？例如30號填寫30';
+                }
+            }
+
             const classId = resolveClassId(text, fallbackClassId);
             const data = await fetchClassData(classId);
             if (!data || data.__firebaseError) {
                 const reason = data && data.__errorMessage ? data.__errorMessage : 'Firebase 讀取失敗';
-                return `${classId ? `班級 ${classId}` : '目前班級'}：${reason}`;
+                return reason;
             }
-            return buildReplyTextForData(item.type, data, classId);
+            return buildReplyTextForData(item.type, data, classId, studentNumber);
         }
     }
 
-    return `目前沒有對應的關鍵字。可用指令：\n${ARG_COMMANDS.map((cmd, index) => `${index + 1}. ${cmd}`).join('\n')}`;
+    return null;
 }
 
 function sendLineReply(userId, replyText) {
@@ -425,11 +475,13 @@ app.post('/webhook', async (req, res) => {
             }
 
             const text = event.message.text || '';
-            const replyText = await buildReply(text, DEFAULT_CLASS_ID);
             const userId = event.source?.userId || null;
+            const replyText = await buildReply(text, DEFAULT_CLASS_ID, userId);
 
             console.log('[webhook] message:', text, 'userId:', userId);
-            await sendLineReply(userId, replyText);
+            if (replyText) {
+                await sendLineReply(userId, replyText);
+            }
         }
 
         res.status(200).json({ ok: true });

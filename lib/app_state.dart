@@ -595,6 +595,19 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> adjustSeatScoreByStudent(SeatData student, int delta) async {
+    final index = seats.indexWhere((seat) => seat.number == student.number && seat.name == student.name);
+    if (index < 0) {
+      final fallback = seats.indexWhere((seat) => seat.number == student.number);
+      if (fallback < 0) return;
+      seats[fallback].score += delta;
+    } else {
+      seats[index].score += delta;
+    }
+    await _save();
+    notifyListeners();
+  }
+
   Future<void> setDarkMode(bool value) async {
     darkMode = value;
     final prefs = await SharedPreferences.getInstance();
@@ -660,49 +673,16 @@ class AppState extends ChangeNotifier {
     final rowSeats = seats.where((seat) => seat.row == row).toList()..sort((a, b) => a.slot.compareTo(b.slot));
     for (var slot = 0; slot < rowSeats.length; slot++) {
       rowSeats[slot].slot = slot;
+      rowSeats[slot].number = '${row + 1}-${slot + 1}';
     }
   }
 
   Future<void> rotateSeats(int direction) async {
     if (seats.isEmpty) return;
-    final highestRow = seats.map((seat) => seat.row).reduce((a, b) => a > b ? a : b);
-    final slots = seats.map((seat) => seat.slot).toSet();
-    for (final slot in slots) {
-      final slotSeats = seats.where((seat) => seat.slot == slot).toList();
-      final occupiedRows = slotSeats.map((seat) => seat.row).toSet();
-      int? emptyRow;
-      if (direction < 0) {
-        for (var row = 0; row < highestRow; row++) {
-          if (!occupiedRows.contains(row) && occupiedRows.contains(row + 1)) {
-            emptyRow = row;
-            break;
-          }
-        }
-      } else {
-        for (var row = highestRow; row > 0; row--) {
-          if (!occupiedRows.contains(row) && occupiedRows.contains(row - 1)) {
-            emptyRow = row;
-            break;
-          }
-        }
-      }
-      if (emptyRow == null) {
-        for (final seat in slotSeats) {
-          if (direction < 0) {
-            seat.row = seat.row == 0 ? highestRow : seat.row - 1;
-          } else {
-            seat.row = seat.row == highestRow ? 0 : seat.row + 1;
-          }
-        }
-        continue;
-      }
-      for (final seat in slotSeats) {
-        if (direction < 0 && seat.row > emptyRow) {
-          seat.row--;
-        } else if (direction > 0 && seat.row < emptyRow) {
-          seat.row++;
-        }
-      }
+    final gridWidth = (seats.map((seat) => seat.row).reduce((a, b) => a > b ? a : b) + 1).clamp(6, 10000);
+    for (final seat in seats) {
+      seat.row = (seat.row + direction) % gridWidth;
+      if (seat.row < 0) seat.row += gridWidth;
     }
     await _save();
     notifyListeners();
@@ -712,27 +692,72 @@ class AppState extends ChangeNotifier {
     if (firstIndex == secondIndex) return;
     final first = seats[firstIndex];
     final second = seats[secondIndex];
+    final firstRow = first.row;
+    final firstSlot = first.slot;
+    final secondRow = second.row;
+    final secondSlot = second.slot;
     final number = first.number;
     final name = first.name;
     final gender = first.gender;
     final label = first.label;
+
     first.number = second.number;
     first.name = second.name;
     first.gender = second.gender;
     first.label = second.label;
+    first.row = secondRow;
+    first.slot = secondSlot;
+
     second.number = number;
     second.name = name;
     second.gender = gender;
     second.label = label;
+    second.row = firstRow;
+    second.slot = firstSlot;
+
+    if (firstRow == secondRow) {
+      _normalizeRowSlots(firstRow);
+    } else {
+      _normalizeRowSlots(firstRow);
+      _normalizeRowSlots(secondRow);
+    }
+
     await _save();
     notifyListeners();
   }
 
   Future<void> moveSeatTo(int index, {required int row, required int slot}) async {
-    final occupied = seats.any((seat) => seat.row == row && seat.slot == slot);
+    final target = seats[index];
+    final occupied = seats.any((seat) => seat.row == row && seat.slot == slot && seat != target);
     if (occupied) return;
-    seats[index].row = row;
-    seats[index].slot = slot;
+    final originalRow = target.row;
+    final originalSlot = target.slot;
+    if (originalRow == row && originalSlot == slot) return;
+
+    if (originalRow == row) {
+      final rowSeats = seats.where((seat) => seat.row == row && seat != target).toList()
+        ..sort((a, b) => a.slot.compareTo(b.slot));
+      for (final seat in rowSeats) {
+        if (seat.slot == slot) continue;
+        if ((originalSlot < slot && seat.slot > originalSlot && seat.slot <= slot) ||
+            (originalSlot > slot && seat.slot < originalSlot && seat.slot >= slot)) {
+          seat.slot += originalSlot < slot ? -1 : 1;
+        }
+      }
+      target.row = row;
+      target.slot = slot;
+      target.number = '${row + 1}-${slot + 1}';
+      _normalizeRowSlots(row);
+      await _save();
+      notifyListeners();
+      return;
+    }
+
+    target.row = row;
+    target.slot = slot;
+    target.number = '${row + 1}-${slot + 1}';
+    _normalizeRowSlots(originalRow);
+    _normalizeRowSlots(row);
     await _save();
     notifyListeners();
   }
@@ -824,14 +849,19 @@ class AppState extends ChangeNotifier {
 
   Future<void> recordAttendance(SeatData student, {DateTime? at, bool? late}) async {
     final value = at ?? DateTime.now();
+    final isLate = late ?? isLateAt(value);
     attendanceRecords.removeWhere((item) => item.studentNumber == student.number && item.date == _dateKey(value));
     attendanceRecords.add(AttendanceRecord(
       studentNumber: student.number,
       studentName: student.name,
       date: _dateKey(value),
       time: _timeKey(value),
-      late: late ?? isLateAt(value),
+      late: isLate,
     ));
+    if (!isLate) {
+      await adjustSeatScoreByStudent(student, 1);
+      return;
+    }
     await _save();
     notifyListeners();
   }
@@ -854,6 +884,13 @@ class AppState extends ChangeNotifier {
           type: type,
           note: note,
         ));
+    final lowered = type.trim();
+    final isPenalty =
+        lowered.contains('秩序') || lowered.contains('晚進') || lowered.contains('缺交') || lowered.contains('被記');
+    if (isPenalty) {
+      await adjustSeatScoreByStudent(student, -1);
+      return;
+    }
     await _save();
     notifyListeners();
   }

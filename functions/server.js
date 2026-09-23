@@ -20,7 +20,6 @@ const ARG_COMMANDS = [
 ];
 
 const KEYWORDS = [
-    { key: ['指令清單', 'command list', 'novice driver badge'], reply: `可用指令：\n1. 查看聯絡簿 -- 看看今天有什麼功課\n2. 查看課表 -- 看看今天/這週課程安排\n3. 查看分數 -- 看看班級裡的分數資料\n4. 查看今日簽到時間 -- 看看今天到教室的時間\n5. 查看被記 -- 看看今天有沒有被登記` },
     { key: ['查看聯絡簿', '聯絡簿', 'homework', '功課'], type: 'diary' },
     { key: ['查看課表', '課表', 'schedule'], type: 'schedule' },
     { key: ['查看分數', '分數', 'score', 'grades'], type: 'score' },

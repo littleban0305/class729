@@ -170,6 +170,105 @@ void main() {
     expect(state.seats[0].score, 5);
   });
 
+  test('seat score still updates even when cloud sync fails', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.classId = '729';
+    state.deviceRole = 'teacher';
+    state.cloudSyncEnabled = true;
+    state.seats = [
+      SeatData(number: '1', name: '小明', row: 0, slot: 0, score: 3),
+    ];
+
+    await state.adjustSeatScore(0, 4);
+
+    expect(state.seats[0].score, 7);
+    expect(state.cloudSyncError, isNotNull);
+  });
+
+  test('seat score imported from JSON or Firebase accepts numeric strings', () {
+    final seat = SeatData.fromJson({
+      'number': '1',
+      'name': '小明',
+      'row': 0,
+      'slot': 0,
+      'score': '8',
+    });
+
+    expect(seat.score, 8);
+  });
+
+  test('on-time attendance gives a bonus and discipline records deduct points', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.seats = [
+      SeatData(number: '1', name: '小明', row: 0, slot: 0, score: 0),
+    ];
+
+    await state.recordAttendance(state.seats[0], at: DateTime(2026, 9, 23, 7, 15), late: false);
+    expect(state.seats[0].score, 1);
+    expect(state.studentRecords.first.type, '不遲到加分');
+
+    await state.addStudentRecord(student: state.seats[0], type: '被記扣分', note: '吵鬧');
+    expect(state.seats[0].score, 0);
+    expect(state.studentRecords.first.type, '被記扣分');
+  });
+
+  test('row slides through empty slots when shifted left or right', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final leftState = AppState();
+    leftState.seats = [
+      SeatData(number: '1', name: 'A', row: 1, slot: 0),
+      SeatData(number: '2', name: 'B', row: 3, slot: 0),
+    ];
+
+    await leftState.rotateSeats(-1);
+    expect(leftState.seats.firstWhere((seat) => seat.name == 'A').row, 0);
+    expect(leftState.seats.firstWhere((seat) => seat.name == 'B').row, 2);
+    expect(leftState.seats.firstWhere((seat) => seat.name == 'A').slot, 0);
+    expect(leftState.seats.firstWhere((seat) => seat.name == 'B').slot, 0);
+
+    final rightState = AppState();
+    rightState.seats = [
+      SeatData(number: '1', name: 'A', row: 0, slot: 1),
+      SeatData(number: '2', name: 'B', row: 2, slot: 1),
+    ];
+
+    await rightState.rotateSeats(1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'A').row, 1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'B').row, 3);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'A').slot, 1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'B').slot, 1);
+  });
+
+  test('row movement wraps horizontally at both ends', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final rightState = AppState();
+    rightState.seats = [
+      for (var row = 0; row < 6; row++) SeatData(number: '${row + 1}-1', name: 'S$row', row: row, slot: 0),
+    ];
+
+    await rightState.rotateSeats(1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').row, 0);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S0').row, 1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').slot, 0);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S0').slot, 0);
+
+    await rightState.rotateSeats(-1);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S0').row, 0);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').row, 5);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S0').slot, 0);
+    expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').slot, 0);
+  });
+
   test('reminder element rotation is preserved through copy and JSON conversion', () {
     final element = ReminderElementData(
       id: 'rotated-text',

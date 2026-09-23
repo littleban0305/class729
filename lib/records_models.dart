@@ -1,3 +1,14 @@
+int _coerceInt(dynamic value, {int fallback = 0}) {
+  if (value is num) return value.toInt();
+  if (value is String) {
+    final parsed = int.tryParse(value.trim());
+    if (parsed != null) return parsed;
+    final decimal = double.tryParse(value.trim());
+    if (decimal != null) return decimal.toInt();
+  }
+  return fallback;
+}
+
 class AttendanceRecord {
   final String studentNumber;
   final String studentName;
@@ -110,7 +121,7 @@ class CleanlinessRecord {
         date: json['date'] as String? ?? '',
         area: json['area'] as String? ?? '教室',
         evaluator: json['evaluator'] as String? ?? '',
-        score: (json['score'] as num?)?.toInt() ?? 0,
+        score: _coerceInt(json['score'], fallback: 0),
         studentNumber: json['studentNumber'] as String? ?? '',
         studentName: json['studentName'] as String? ?? '',
         result: json['result'] as String? ?? '一般',

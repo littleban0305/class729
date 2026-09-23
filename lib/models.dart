@@ -1,3 +1,14 @@
+int _coerceInt(dynamic value, {int fallback = 0}) {
+  if (value is num) return value.toInt();
+  if (value is String) {
+    final parsed = int.tryParse(value.trim());
+    if (parsed != null) return parsed;
+    final decimal = double.tryParse(value.trim());
+    if (decimal != null) return decimal.toInt();
+  }
+  return fallback;
+}
+
 class ActionButtonData {
   String text;
   String url;
@@ -469,12 +480,12 @@ class SeatData {
   factory SeatData.fromJson(Map<String, dynamic> json) => SeatData(
         number: json['number'] as String? ?? '',
         name: json['name'] as String? ?? '',
-        row: (json['row'] as num?)?.toInt() ?? 0,
-        slot: (json['slot'] as num?)?.toInt() ?? -1,
+        row: _coerceInt(json['row'], fallback: 0),
+        slot: _coerceInt(json['slot'], fallback: -1),
         gender: json['gender'] as String? ?? '',
         label: json['label'] as String? ?? '',
         note: json['note'] as String? ?? '',
-        score: (json['score'] as num?)?.toInt() ?? 0,
+        score: _coerceInt(json['score'], fallback: 0),
       );
 }
 

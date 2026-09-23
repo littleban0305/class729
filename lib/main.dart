@@ -3694,68 +3694,55 @@ class _SeatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final seat = state.seats[index];
-    final card = Card(
-      color: _seatColor(context, seat.gender),
+    final card = Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: editable ? onEdit : () => _showSeatProfile(context, state, index, seat),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Stack(
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          height: 108,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                _seatColor(context, seat.gender).withValues(alpha: 0.96),
+                _seatColor(context, seat.gender).withValues(alpha: 0.84),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.8),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(seat.number, style: const TextStyle(fontSize: 18)),
-                  const Spacer(),
-                  Text(
+              Text(
+                seat.number,
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
                     seat.name.isEmpty ? '空位' : seat.name,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              if (seat.label.trim().isNotEmpty)
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  left: 62,
-                  child: SizedBox(
-                    height: 27,
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        seat.label.length > 4 ? '${seat.label.substring(0, 4)}...' : seat.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.clip,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: seat.score >= 0 ? Colors.green.withValues(alpha: 0.18) : Colors.red.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '${seat.score >= 0 ? "+" : ""}${seat.score}',
-                    style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 21,
                       fontWeight: FontWeight.w800,
-                      color: seat.score >= 0 ? Colors.green : Colors.red,
+                      height: 1.1,
                     ),
                   ),
                 ),
@@ -3766,20 +3753,24 @@ class _SeatCard extends StatelessWidget {
       ),
     );
     if (!editable) return card;
-    return LongPressDraggable<int>(
+    return Draggable<int>(
       data: index,
       feedback: Material(
         color: Colors.transparent,
         child: SizedBox(
           width: 150,
           height: 108,
-          child: Opacity(opacity: 0.78, child: card),
+          child: Opacity(opacity: 0.82, child: card),
         ),
       ),
       childWhenDragging: Opacity(opacity: 0.3, child: card),
       child: DragTarget<int>(
         onWillAcceptWithDetails: (details) => details.data != index,
-        onAcceptWithDetails: (details) => state.swapSeats(details.data, index),
+        onAcceptWithDetails: (details) {
+          final sourceIndex = details.data;
+          if (sourceIndex == index) return;
+          state.swapSeats(sourceIndex, index);
+        },
         builder: (context, candidates, rejected) => AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           decoration: candidates.isEmpty

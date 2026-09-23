@@ -37,6 +37,11 @@ class AppState extends ChangeNotifier {
   String? cloudSyncError;
   DateTime? lastCloudSyncAt;
 
+  String _normalizeClassId(String value) {
+    final trimmed = value.trim();
+    return trimmed;
+  }
+
   void setCloudSyncError(String? error) {
     cloudSyncError = error;
     notifyListeners();
@@ -70,7 +75,7 @@ class AppState extends ChangeNotifier {
     final cleanlinessRaw = prefs.getString(_cleanlinessKey);
     final photosRaw = prefs.getString(_photosKey);
     final weeklySelectionsRaw = prefs.getString(_weeklySelectionsKey);
-    classId = prefs.getString(_classIdKey) ?? '';
+    classId = _normalizeClassId(prefs.getString(_classIdKey) ?? '');
     deviceRole = prefs.getString(_deviceRoleKey) ?? '';
     lateThreshold = prefs.getString(_lateThresholdKey) ?? '07:30';
     darkMode = prefs.getBool(_darkModeKey) ?? false;
@@ -286,7 +291,16 @@ class AppState extends ChangeNotifier {
     try {
       final authError = await AuthService().ensureFirebaseSession();
       if (authError != null) throw Exception('教師雲端登入失敗：$authError');
-      await cloud.pushState(classId, snapshot);
+      final normalizedId = _normalizeClassId(classId);
+      if (normalizedId != classId) {
+        classId = normalizedId;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_classIdKey, classId);
+      }
+      await Future.wait([
+        cloud.pushState(classId, snapshot),
+        cloud.pushPublicDiary(classId, snapshot),
+      ]);
       cloudSyncError = null;
       lastCloudSyncAt = DateTime.now();
       notifyListeners();
@@ -300,6 +314,12 @@ class AppState extends ChangeNotifier {
     try {
       final authError = await AuthService().ensureFirebaseSession();
       if (authError != null) throw Exception('大屏雲端登入失敗：$authError');
+      final normalizedId = _normalizeClassId(classId);
+      if (normalizedId != classId) {
+        classId = normalizedId;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_classIdKey, classId);
+      }
       await Future.wait([
         cloud.pushPublicDiary(classId, snapshot),
         cloud.pushAttendanceToday(classId, snapshot),
@@ -314,7 +334,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setClassId(String value) async {
-    classId = value.trim();
+    classId = _normalizeClassId(value);
     cloudSyncEnabled = kFirebaseConfigured && firebaseRuntimeReady;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_classIdKey, classId);

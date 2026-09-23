@@ -11,3 +11,12 @@ coverage/
 *.iml
 .DS_Store
 Thumbs.db
+
+# Firebase / local secret files
+functions/class-729-app-firebase-adminsdk-fbsvc-67f7690e0d.json
+functions/.env
+functions/.env.*
+!functions/.env.example
+**/node_modules/
+package-lock.json
+functions/package-lock.json

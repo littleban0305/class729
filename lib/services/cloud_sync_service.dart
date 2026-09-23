@@ -97,9 +97,14 @@ class CloudSyncService {
     await _classes(db).doc(id).set(_publicData(data), SetOptions(merge: true));
   }
 
+  String _normalizeClassId(String value) {
+    final trimmed = value.trim();
+    return trimmed;
+  }
+
   Future<void> pushPublicDiary(String classId, Map<String, dynamic> data) async {
     final db = _db;
-    final id = classId.trim();
+    final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
     await _ensureWriteUser();
@@ -111,7 +116,7 @@ class CloudSyncService {
 
   Future<void> pushState(String classId, Map<String, dynamic> data) async {
     final db = _db;
-    final id = classId.trim();
+    final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
     await _ensureWriteUser();
@@ -132,7 +137,7 @@ class CloudSyncService {
 
   Future<void> pushAttendanceToday(String classId, Map<String, dynamic> data) async {
     final db = _db;
-    final id = classId.trim();
+    final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
     await _ensureWriteUser();
@@ -144,7 +149,7 @@ class CloudSyncService {
 
   Future<Map<String, dynamic>?> fetchState(String classId) async {
     final db = _db;
-    final id = classId.trim();
+    final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
 

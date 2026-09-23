@@ -1,0 +1,17 @@
+{
+    "name": "class729-line-keyword-functions",
+    "private": true,
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "serve": "firebase emulators:start --only functions",
+        "deploy": "firebase deploy --only functions",
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "dependencies": {
+        "express": "^4.21.2",
+        "firebase-admin": "^12.6.0",
+        "firebase-functions": "^6.0.0"
+    }
+}

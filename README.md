@@ -32,6 +32,16 @@ Flutter + Dart 桌面 App，設計給 VS Code 開發與 GitHub 管理。
 
 > 目前資料仍採「本機離線優先」。手機與電腦的雲端即時同步、LINE 官方帳號、畢業影片自動生成先不塞進 V1，等核心功能穩定後再做。
 
+## LINE 官方帳號關鍵字回覆（免費整合路線）
+
+這個專案已新增免費架構範例：
+
+- Flutter 側：`lib/services/line_keyword_service.dart`
+- 後端：`functions/index.js`
+- 設定說明：`LINE_KEYWORD_SETUP.md`
+
+這個方案使用 Firebase Cloud Functions（免費額度足夠先做原型）來處理 LINE 關鍵字回覆，並讓 Flutter 端呼叫 API。
+
 ## 在 VS Code 開發
 
 1. 安裝 Flutter SDK 與 Dart/Flutter VS Code 擴充套件。

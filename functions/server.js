@@ -162,10 +162,20 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
         const todayLessons = entries.filter((entry) => entry.weekday === weekdayIndex);
 
         if (!todayLessons.length) {
-            return `今天沒有排課；目前可用課表：\n${entries.slice(0, 3).map((entry) => `星期${DAY_NAMES[entry.weekday] || entry.weekday + 1} 第${entry.lesson + 1}節 ${entry.subject || '未命名'}`).join('\n')}`;
+            const preview = entries.slice(0, 3).map((entry) => {
+                const time = entry.startTime && entry.endTime ? `${entry.startTime}-${entry.endTime}` : '時間未定';
+                const teacher = entry.teacher ? ` (${entry.teacher})` : '';
+                return `星期${DAY_NAMES[entry.weekday] || entry.weekday + 1}\n第${entry.lesson + 1}節 ${time}\n${entry.subject || '未命名'}${teacher}`;
+            }).join('\n\n');
+            return `今天沒有排課；目前可用課表：\n${preview}`;
         }
 
-        return `今天的課表：\n${todayLessons.map((entry) => `第${entry.lesson + 1}節 ${entry.subject || '未命名'}${entry.teacher ? ` (${entry.teacher})` : ''}${entry.startTime && entry.endTime ? ` ${entry.startTime}-${entry.endTime}` : ''}`).join('\n')}`;
+        const lessonText = todayLessons.map((entry) => {
+            const time = entry.startTime && entry.endTime ? `${entry.startTime}-${entry.endTime}` : '時間未定';
+            const teacher = entry.teacher ? ` (${entry.teacher})` : '';
+            return `第${entry.lesson + 1}節 ${time}\n${entry.subject || '未命名'}${teacher}`;
+        }).join('\n\n');
+        return `今天的課表：\n${lessonText}`;
     }
 
     if (type === 'diary') {

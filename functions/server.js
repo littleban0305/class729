@@ -184,30 +184,20 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
         const allSeats = asArray(data?.seats)
             .filter((entry) => entry && typeof entry === 'object')
             .map((entry) => ({
-                number: toPlainLine(entry.number),
+                number: toPlainLine(entry.number).replace(/^0+(?=\d)/, ''),
                 name: toPlainLine(entry.name),
                 score: Number(entry.score ?? 0),
             }))
             .filter((entry) => entry.number || entry.name || entry.score !== 0);
         const seats = studentNumber
-            ? allSeats.filter((entry) => entry.number === studentNumber).slice(0, 1)
+            ? allSeats.filter((entry) => entry.number === studentNumber.replace(/^0+(?=\d)/, '')).slice(0, 1)
             : allSeats.slice(0, 5);
 
-        const cleanliness = asArray(data?.cleanlinessRecords)
-            .filter((entry) => entry && typeof entry === 'object')
-            .map((entry) => ({
-                studentName: toPlainLine(entry.studentName),
-                score: Number(entry.score ?? 0),
-                area: toPlainLine(entry.area),
-            }))
-            .slice(0, 3);
-
         if (seats.length) {
-            return `分數資料：\n${seats.map((entry) => `${entry.number || entry.name || '座位'}：${entry.score}`).join('\n')}`;
-        }
-
-        if (cleanliness.length) {
-            return `整潔分數：\n${cleanliness.map((entry) => `${entry.studentName || '學生'}：${entry.score} 分（${entry.area || '教室'}）`).join('\n')}`;
+            if (studentNumber) {
+                return `你現在有${seats[0].score}分。`;
+            }
+            return seats.map((entry) => `${entry.number || entry.name || '座位'}：${entry.score}`).join('\n');
         }
 
         return '目前沒有可查詢的分數資料。';
@@ -330,7 +320,7 @@ async function fetchClassData(classId) {
             if (publicDoc.exists || privateDoc.exists) {
                 const publicData = publicDoc.exists ? publicDoc.data() || {} : {};
                 const privateData = privateDoc.exists ? privateDoc.data() || {} : {};
-                merged = { ...privateData, ...publicData };
+                merged = { ...publicData, ...privateData };
                 if (Object.keys(merged).length > 0) {
                     return merged;
                 }

@@ -320,7 +320,9 @@ async function fetchClassData(classId) {
             if (publicDoc.exists || privateDoc.exists) {
                 const publicData = publicDoc.exists ? publicDoc.data() || {} : {};
                 const privateData = privateDoc.exists ? privateDoc.data() || {} : {};
-                merged = { ...publicData, ...privateData };
+                // Public fields contain the latest shared seat/score snapshot.
+                // Keep private-only records, but let the shared snapshot win.
+                merged = { ...privateData, ...publicData };
                 if (Object.keys(merged).length > 0) {
                     return merged;
                 }
@@ -369,9 +371,18 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
                 studentNumber = toPlainLine(profile?.studentNumber);
 
                 if (!studentNumber) {
-                    await saveLineUserProfile(userId, { awaitingStudentNumber: true });
-                    return '請問你是幾號？例如30號填寫30';
+                    const numberMatch = text.match(/(?:座號|學號)?\s*(\d{1,3})\s*(?:號)?/);
+                    if (numberMatch && isValidStudentNumber(numberMatch[1])) {
+                        studentNumber = numberMatch[1];
+                        if (userId) {
+                            await saveLineUserProfile(userId, {
+                                studentNumber,
+                                awaitingStudentNumber: false,
+                            });
+                        }
+                    }
                 }
+
             }
 
             const classId = resolveClassId(text, fallbackClassId);

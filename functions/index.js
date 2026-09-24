@@ -1,46 +1,49 @@
 const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
+const https = require('https');
+const { buildReply } = require('./server');
 
 admin.initializeApp();
 
-const KEYWORDS = [
-    {
-        key: ['課表', 'schedule', 'class schedule'],
-        reply: '目前課表已更新在班級公告欄，請以最新公告為準。',
-    },
-    {
-        key: ['報名', 'register', 'signup', '加入'],
-        reply: '請至班級公告欄或聯絡老師，完成報名與確認流程。',
-    },
-    {
-        key: ['價格', 'price', '費用', 'cost'],
-        reply: '費用資訊請以老師公告為主，若需要細節請聯絡班級老師。',
-    },
-    {
-        key: ['聯絡', 'contact', '客服', 'help'],
-        reply: '請直接聯絡班級老師，或使用聯絡簿/聯絡資訊頁面。',
-    },
-    {
-        key: ['你好', 'hi', 'hello', '哈囉'],
-        reply: '您好，歡迎使用 729 班級助手。輸入「課表」、「報名」、「價格」或「聯絡」即可查詢。',
-    },
-];
+const DEFAULT_CLASS_ID = (process.env.LINE_DEFAULT_CLASS_ID || process.env.CLASS_ID || '729').trim();
+const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 
-function buildReply(message) {
-    const text = (message || '').toString().trim();
-    if (!text) {
-        return '請輸入關鍵字，例如：課表、報名、價格、聯絡我們。';
+function sendLineReply(replyToken, replyText) {
+    if (!LINE_ACCESS_TOKEN || !replyToken) {
+        console.log('[LINE] reply skipped', { replyToken: !!replyToken, replyText });
+        return Promise.resolve();
     }
 
-    const normalized = text.toLowerCase();
-    for (const item of KEYWORDS) {
-        const matched = item.key.some((keyword) => normalized.includes(keyword.toLowerCase()));
-        if (matched) {
-            return item.reply;
-        }
-    }
+    const payload = JSON.stringify({
+        replyToken,
+        messages: [{ type: 'text', text: replyText }],
+    });
 
-    return '目前沒有對應的關鍵字，請輸入：課表、報名、價格、聯絡、你好。';
+    return new Promise((resolve, reject) => {
+        const request = https.request({
+            hostname: 'api.line.me',
+            path: '/v2/bot/message/reply',
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${LINE_ACCESS_TOKEN}`,
+                'Content-Type': 'application/json; charset=utf-8',
+                'Content-Length': Buffer.byteLength(payload, 'utf8'),
+            },
+        }, (response) => {
+            let responseText = '';
+            response.on('data', (chunk) => responseText += chunk);
+            response.on('end', () => {
+                if (response.statusCode >= 200 && response.statusCode < 300) {
+                    resolve();
+                    return;
+                }
+                reject(new Error(`LINE reply failed: ${response.statusCode} ${responseText}`));
+            });
+        });
+        request.on('error', reject);
+        request.write(payload);
+        request.end();
+    });
 }
 
 exports.lineKeywordReply = functions.https.onRequest(async (req, res) => {
@@ -55,7 +58,7 @@ exports.lineKeywordReply = functions.https.onRequest(async (req, res) => {
     try {
         const payload = req.body || {};
         const userMessage = (payload.message || '').toString();
-        const reply = buildReply(userMessage);
+        const reply = await buildReply(userMessage, DEFAULT_CLASS_ID, payload.userId || null);
 
         return res.status(200).json({
             ok: true,
@@ -87,18 +90,19 @@ exports.lineWebhook = functions.https.onRequest(async (req, res) => {
             }
 
             const text = event.message.text || '';
-            const replyText = buildReply(text);
+            const userId = event.source?.userId || null;
+            const replyText = await buildReply(text, DEFAULT_CLASS_ID, userId);
 
             await admin.firestore().collection('line_replies').add({
-                userId: event.source?.userId || null,
+                userId,
                 replyText,
                 originalText: text,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            // 這裡表示：將來你可以把 replyText 透過 LINE Messaging API 回送給使用者。
-            // 你需要額外補上 LINE_CHANNEL_ACCESS_TOKEN 以及 Messaging API 呼叫。
-            console.log('[lineWebhook] replyText=', replyText);
+            if (replyText && event.replyToken) {
+                await sendLineReply(event.replyToken, replyText);
+            }
         }
 
         return res.status(200).json({ ok: true });

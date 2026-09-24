@@ -33,6 +33,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>?>? _teacherCloudSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _registrationSubscription;
   bool _seatMutationPending = false;
+  DateTime? _ignorePublicCloudUntil;
   String _watchedPublicClassId = '';
   String _watchedTeacherClassId = '';
   String? cloudSyncError;
@@ -192,6 +193,7 @@ class AppState extends ChangeNotifier {
     _publicCloudSubscription = cloud.watchPublicState(id).listen(
       (data) {
         if (data == null) return;
+        if (_seatMutationPending || (_ignorePublicCloudUntil?.isAfter(DateTime.now()) ?? false)) return;
         cloudSyncError = null;
         lastCloudSyncAt = DateTime.now();
         unawaited(applyPublicCloudData(data));
@@ -323,6 +325,7 @@ class AppState extends ChangeNotifier {
         await prefs.setString(_classIdKey, classId);
       }
       await Future.wait([
+        cloud.pushPublicState(classId, snapshot),
         cloud.pushPublicDiary(classId, snapshot),
         cloud.pushAttendanceToday(classId, snapshot),
       ]);
@@ -593,8 +596,16 @@ class AppState extends ChangeNotifier {
   Future<void> adjustSeatScore(int index, int delta) async {
     if (index < 0 || index >= seats.length) return;
     seats[index].score += delta;
-    await _save();
+    if (deviceRole == 'bigscreen') {
+      _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
+    }
+    _seatMutationPending = true;
     notifyListeners();
+    try {
+      await _save();
+    } finally {
+      _seatMutationPending = false;
+    }
   }
 
   Future<void> adjustSeatScoreByStudent(SeatData student, int delta) async {
@@ -606,8 +617,16 @@ class AppState extends ChangeNotifier {
     } else {
       seats[index].score += delta;
     }
-    await _save();
+    if (deviceRole == 'bigscreen') {
+      _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
+    }
+    _seatMutationPending = true;
     notifyListeners();
+    try {
+      await _save();
+    } finally {
+      _seatMutationPending = false;
+    }
   }
 
   Future<void> setDarkMode(bool value) async {

@@ -317,6 +317,43 @@ void main() {
     expect(state.seats.firstWhere((seat) => seat.name == 'B').row, 0);
   });
 
+  testWidgets('big screen seat board is not draggable', (WidgetTester tester) async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.deviceRole = 'bigscreen';
+    state.seats = [
+      SeatData(number: '1-1', name: 'A', row: 0, slot: 0),
+      SeatData(number: '2-1', name: 'B', row: 1, slot: 0),
+    ];
+    await tester.pumpWidget(MaterialApp(home: SeatPage(state: state)));
+    await tester.pump();
+
+    expect(find.byType(Draggable<int>), findsNothing);
+  });
+
+  testWidgets('big screen score panel updates without closing', (WidgetTester tester) async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.deviceRole = 'bigscreen';
+    state.seats = [SeatData(number: '1-1', name: 'A', row: 0, slot: 0)];
+    await tester.pumpWidget(MaterialApp(home: SeatPage(state: state)));
+    await tester.pump();
+
+    await tester.tap(find.text('A'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+
+    expect(state.seats.single.score, 1);
+    expect(find.byType(AlertDialog), findsOneWidget);
+  });
+
   test('moving a seat to an empty slot preserves its seat number', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});

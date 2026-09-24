@@ -3511,7 +3511,11 @@ class SeatPage extends StatelessWidget {
                 child: SizedBox(
                   width: 1180,
                   height: 640,
-                  child: _SeatRows(state: state, editable: false, draggable: true),
+                  child: _SeatRows(
+                    state: state,
+                    editable: false,
+                    draggable: state.deviceRole != 'bigscreen',
+                  ),
                 ),
               ),
             ),
@@ -3907,88 +3911,140 @@ Future<void> _editSeat(
 Future<void> _showSeatProfile(BuildContext context, AppState state, int index, SeatData seat) async {
   await showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('同學資料'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _profileRow(context, '姓名', seat.name.isEmpty ? '空位' : seat.name),
-          _profileRow(context, '座號', seat.number),
-          _profileRow(context, '積分', '${seat.score}'),
-          _profileRow(context, '幹部/小老師', seat.label.isEmpty ? '無' : seat.label),
-          _profileRow(context, '備註', seat.note.isEmpty ? '無' : seat.note),
-          const SizedBox(height: 8),
-          Row(
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        Future<void> changeScore(int delta) async {
+          final saveFuture = state.adjustSeatScore(index, delta);
+          if (dialogContext.mounted) setDialogState(() {});
+          await saveFuture;
+        }
+
+        return AlertDialog(
+          title: Row(
             children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () async {
-                    await state.adjustSeatScore(index, 1);
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('加分 +1'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: () async {
-                    await state.adjustSeatScore(index, -1);
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  },
-                  icon: const Icon(Icons.remove),
-                  label: const Text('扣分 -1'),
-                ),
-              ),
+              const Icon(Icons.dashboard_customize_outlined),
+              const SizedBox(width: 10),
+              Expanded(child: Text(seat.name.isEmpty ? '空位' : seat.name)),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await state.adjustSeatScore(index, 5);
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  },
-                  icon: const Icon(Icons.exposure_plus_1_outlined),
-                  label: const Text('加 5'),
-                ),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _profilePanelCard(
+                    context,
+                    width: 248,
+                    icon: Icons.badge_outlined,
+                    title: '座位資訊',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          seat.name.isEmpty ? '空位' : seat.name,
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 6),
+                        Text('座號 ${seat.number}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      ],
+                    ),
+                  ),
+                  _profilePanelCard(
+                    context,
+                    width: 248,
+                    icon: Icons.stars_outlined,
+                    title: '目前積分',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${seat.score}', style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w900)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: () => changeScore(1),
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('+1'),
+                            ),
+                            FilledButton.tonalIcon(
+                              onPressed: () => changeScore(-1),
+                              icon: const Icon(Icons.remove, size: 18),
+                              label: const Text('-1'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => changeScore(5),
+                              icon: const Icon(Icons.exposure_plus_1_outlined, size: 18),
+                              label: const Text('+5'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => changeScore(-5),
+                              icon: const Icon(Icons.exposure_neg_1_outlined, size: 18),
+                              label: const Text('-5'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  _profilePanelCard(
+                    context,
+                    width: 248,
+                    icon: Icons.label_outline,
+                    title: '標籤／職務',
+                    child: Text(seat.label.isEmpty ? '尚未設定' : seat.label),
+                  ),
+                  _profilePanelCard(
+                    context,
+                    width: 248,
+                    icon: Icons.notes_outlined,
+                    title: '備註',
+                    child: Text(seat.note.isEmpty ? '沒有備註' : seat.note),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await state.adjustSeatScore(index, -5);
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  },
-                  icon: const Icon(Icons.exposure_neg_1_outlined),
-                  label: const Text('扣 5'),
-                ),
-              ),
-            ],
+            ),
           ),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('關閉')),
-      ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('關閉')),
+          ],
+        );
+      },
     ),
   );
 }
 
-Widget _profileRow(BuildContext context, String label, String value) {
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Text.rich(
-      TextSpan(
-        text: '$label：',
-        style: const TextStyle(fontWeight: FontWeight.w800),
-        children: [TextSpan(text: value, style: const TextStyle(fontWeight: FontWeight.w400))],
+Widget _profilePanelCard(
+  BuildContext context, {
+  required double width,
+  required IconData icon,
+  required String title,
+  required Widget child,
+}) {
+  return SizedBox(
+    width: width,
+    child: Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 19),
+                const SizedBox(width: 7),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            child,
+          ],
+        ),
       ),
-      style: TextStyle(fontSize: 16, color: Theme.of(context).colorScheme.onSurface),
     ),
   );
 }

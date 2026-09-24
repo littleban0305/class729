@@ -339,6 +339,43 @@ async function fetchClassData(classId) {
     }
 }
 
+async function addDisciplineRecord(classId, studentNumber, note) {
+    const db = initFirebase();
+    const id = normalizeClassId(classId || DEFAULT_CLASS_ID || '729');
+    const stateRef = db.collection('classes').doc(id).collection('private').doc('state');
+    const snapshot = await stateRef.get();
+    const state = snapshot.exists ? snapshot.data() || {} : {};
+    const seats = asArray(state.seats).map((entry) => ({ ...entry }));
+    const normalizedNumber = normalizeText(studentNumber).replace(/^0+(?=\d)/, '');
+    const seat = seats.find((entry) => toPlainLine(entry.number).replace(/^0+(?=\d)/, '') === normalizedNumber);
+    if (!seat) return null;
+
+    const now = new Date();
+    const studentRecords = asArray(state.studentRecords).map((entry) => ({ ...entry }));
+    studentRecords.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        studentNumber: toPlainLine(seat.number),
+        studentName: toPlainLine(seat.name),
+        date: getTodayKey(now),
+        time: now.toTimeString().slice(0, 8),
+        type: '被記扣分',
+        note: toPlainLine(note) || 'LINE 被記',
+    });
+    seat.score = Number(seat.score ?? 0) - 1;
+
+    await stateRef.set({
+        seats,
+        studentRecords,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await db.collection('classes').doc(id).set({
+        seats,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return { name: toPlainLine(seat.name), number: toPlainLine(seat.number), score: seat.score };
+}
+
 async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = null) {
     const text = normalizeText(message);
     if (!text) {
@@ -356,6 +393,14 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
             awaitingStudentNumber: false,
         });
         return `已記住你的座號 ${text}。`;
+    }
+
+    const addDisciplineMatch = text.match(/^(?:新增?被記|被記|記錄)\s*(?:座號|學號)?\s*(\d{1,3})\s*(?:號)?\s*(.*)$/i);
+    if (addDisciplineMatch) {
+        const classId = resolveClassId(text, fallbackClassId);
+        const result = await addDisciplineRecord(classId, addDisciplineMatch[1], addDisciplineMatch[2]);
+        if (!result) return `找不到 ${addDisciplineMatch[1]} 號學生。`;
+        return `已記 ${result.number} ${result.name || '同學'}，目前 ${result.score} 分。`;
     }
 
     const normalized = text.toLowerCase();
@@ -504,5 +549,6 @@ module.exports = {
     buildReply,
     buildReplyTextForData,
     fetchClassData,
+    addDisciplineRecord,
     resolveClassId,
 };

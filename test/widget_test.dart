@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show TargetPlatform;
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:class_729/app_state.dart';
@@ -267,6 +268,69 @@ void main() {
     expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').row, 5);
     expect(rightState.seats.firstWhere((seat) => seat.name == 'S0').slot, 0);
     expect(rightState.seats.firstWhere((seat) => seat.name == 'S5').slot, 0);
+  });
+
+  test('drag seat swap exchanges students and positions', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.seats = [
+      SeatData(number: '1-1', name: 'A', row: 0, slot: 0, gender: '男', score: 3),
+      SeatData(number: '2-1', name: 'B', row: 1, slot: 0, gender: '女', score: 5),
+    ];
+
+    await state.swapSeats(0, 1);
+
+    expect(state.seats[0].name, 'A');
+    expect(state.seats[0].number, '1-1');
+    expect(state.seats[0].row, 1);
+    expect(state.seats[0].slot, 0);
+    expect(state.seats[0].gender, '男');
+    expect(state.seats[0].score, 3);
+    expect(state.seats[1].name, 'B');
+    expect(state.seats[1].number, '2-1');
+    expect(state.seats[1].row, 0);
+    expect(state.seats[1].slot, 0);
+    expect(state.seats[1].gender, '女');
+    expect(state.seats[1].score, 5);
+  });
+
+  testWidgets('seat board drag swaps visible cards', (WidgetTester tester) async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.seats = [
+      SeatData(number: '1-1', name: 'A', row: 0, slot: 0),
+      SeatData(number: '2-1', name: 'B', row: 1, slot: 0),
+    ];
+    await tester.pumpWidget(MaterialApp(home: SeatPage(state: state)));
+    await tester.pump();
+
+    final source = tester.getCenter(find.text('A'));
+    final target = tester.getCenter(find.text('B'));
+    await tester.dragFrom(source, target - source);
+    await tester.pumpAndSettle();
+
+    expect(state.seats.firstWhere((seat) => seat.name == 'A').row, 1);
+    expect(state.seats.firstWhere((seat) => seat.name == 'B').row, 0);
+  });
+
+  test('moving a seat to an empty slot preserves its seat number', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.seats = [
+      SeatData(number: '1-1', name: 'A', row: 0, slot: 0),
+    ];
+
+    await state.moveSeatTo(0, row: 2, slot: 1);
+
+    expect(state.seats[0].number, '1-1');
+    expect(state.seats[0].row, 2);
+    expect(state.seats[0].slot, 1);
   });
 
   test('reminder element rotation is preserved through copy and JSON conversion', () {

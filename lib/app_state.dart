@@ -32,6 +32,7 @@ class AppState extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>?>? _publicCloudSubscription;
   StreamSubscription<Map<String, dynamic>?>? _teacherCloudSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _registrationSubscription;
+  bool _seatMutationPending = false;
   String _watchedPublicClassId = '';
   String _watchedTeacherClassId = '';
   String? cloudSyncError;
@@ -218,6 +219,7 @@ class AppState extends ChangeNotifier {
     _teacherCloudSubscription = cloud.watchState(id).listen(
       (data) {
         if (data == null) return;
+        if (_seatMutationPending) return;
         cloudSyncError = null;
         lastCloudSyncAt = DateTime.now();
         _applyImportedData(data, preserveTestNow: true);
@@ -696,70 +698,35 @@ class AppState extends ChangeNotifier {
     final firstSlot = first.slot;
     final secondRow = second.row;
     final secondSlot = second.slot;
-    final number = first.number;
-    final name = first.name;
-    final gender = first.gender;
-    final label = first.label;
-
-    first.number = second.number;
-    first.name = second.name;
-    first.gender = second.gender;
-    first.label = second.label;
     first.row = secondRow;
     first.slot = secondSlot;
-
-    second.number = number;
-    second.name = name;
-    second.gender = gender;
-    second.label = label;
     second.row = firstRow;
     second.slot = firstSlot;
 
-    if (firstRow == secondRow) {
-      _normalizeRowSlots(firstRow);
-    } else {
-      _normalizeRowSlots(firstRow);
-      _normalizeRowSlots(secondRow);
-    }
-
-    await _save();
+    _seatMutationPending = true;
     notifyListeners();
+    try {
+      await _save();
+    } finally {
+      _seatMutationPending = false;
+    }
   }
 
   Future<void> moveSeatTo(int index, {required int row, required int slot}) async {
     final target = seats[index];
     final occupied = seats.any((seat) => seat.row == row && seat.slot == slot && seat != target);
     if (occupied) return;
-    final originalRow = target.row;
-    final originalSlot = target.slot;
-    if (originalRow == row && originalSlot == slot) return;
-
-    if (originalRow == row) {
-      final rowSeats = seats.where((seat) => seat.row == row && seat != target).toList()
-        ..sort((a, b) => a.slot.compareTo(b.slot));
-      for (final seat in rowSeats) {
-        if (seat.slot == slot) continue;
-        if ((originalSlot < slot && seat.slot > originalSlot && seat.slot <= slot) ||
-            (originalSlot > slot && seat.slot < originalSlot && seat.slot >= slot)) {
-          seat.slot += originalSlot < slot ? -1 : 1;
-        }
-      }
-      target.row = row;
-      target.slot = slot;
-      target.number = '${row + 1}-${slot + 1}';
-      _normalizeRowSlots(row);
-      await _save();
-      notifyListeners();
-      return;
-    }
+    if (target.row == row && target.slot == slot) return;
 
     target.row = row;
     target.slot = slot;
-    target.number = '${row + 1}-${slot + 1}';
-    _normalizeRowSlots(originalRow);
-    _normalizeRowSlots(row);
-    await _save();
+    _seatMutationPending = true;
     notifyListeners();
+    try {
+      await _save();
+    } finally {
+      _seatMutationPending = false;
+    }
   }
 
   Future<void> setDiary(List<String> value) async {

@@ -3511,7 +3511,7 @@ class SeatPage extends StatelessWidget {
                 child: SizedBox(
                   width: 1180,
                   height: 640,
-                  child: _SeatRows(state: state, editable: false),
+                  child: _SeatRows(state: state, editable: false, draggable: true),
                 ),
               ),
             ),
@@ -3525,7 +3525,8 @@ class SeatPage extends StatelessWidget {
 class _SeatRows extends StatelessWidget {
   final AppState state;
   final bool editable;
-  const _SeatRows({required this.state, required this.editable});
+  final bool draggable;
+  const _SeatRows({required this.state, required this.editable, this.draggable = false});
 
   @override
   Widget build(BuildContext context) {
@@ -3608,7 +3609,7 @@ class _SeatRows extends StatelessWidget {
                     top: slot * 108,
                     width: 150,
                     height: 108,
-                    child: _buildSlot(context, state, row, slot, indexes, editable),
+                    child: _buildSlot(context, state, row, slot, indexes, editable, draggable),
                   ),
               ],
             ),
@@ -3641,20 +3642,44 @@ class _SeatRows extends StatelessWidget {
     return null;
   }
 
-  Widget _buildSlot(BuildContext context, AppState state, int row, int slot, List<int> indexes, bool editable) {
+  Widget _buildSlot(
+      BuildContext context, AppState state, int row, int slot, List<int> indexes, bool editable, bool draggable) {
     final index = _seatAtSlot(indexes, slot);
     if (index != null) {
+      final seatCard = _SeatCard(
+        state: state,
+        index: index,
+        editable: editable,
+        draggable: draggable,
+        onEdit: () => _editSeat(context, state, index, editable),
+      );
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: _SeatCard(
-          state: state,
-          index: index,
-          editable: editable,
-          onEdit: () => _editSeat(context, state, index, editable),
-        ),
+        child: draggable
+            ? DragTarget<int>(
+                onWillAcceptWithDetails: (details) => details.data != index,
+                onAcceptWithDetails: (details) {
+                  if (details.data != index) state.swapSeats(details.data, index);
+                },
+                hitTestBehavior: HitTestBehavior.opaque,
+                builder: (context, candidates, rejected) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  decoration: candidates.isEmpty
+                      ? null
+                      : BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 3,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                  child: seatCard,
+                ),
+              )
+            : seatCard,
       );
     }
-    if (!editable) return const SizedBox.shrink();
+    if (!draggable) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: DragTarget<int>(
@@ -3682,77 +3707,83 @@ class _SeatCard extends StatelessWidget {
   final AppState state;
   final int index;
   final bool editable;
+  final bool draggable;
   final VoidCallback onEdit;
 
   const _SeatCard({
     required this.state,
     required this.index,
     required this.editable,
+    required this.draggable,
     required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
     final seat = state.seats[index];
-    final card = Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: editable ? onEdit : () => _showSeatProfile(context, state, index, seat),
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          height: 108,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                _seatColor(context, seat.gender).withValues(alpha: 0.96),
-                _seatColor(context, seat.gender).withValues(alpha: 0.84),
+    Widget buildCard() {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: draggable ? null : (editable ? onEdit : () => _showSeatProfile(context, state, index, seat)),
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            height: 108,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  _seatColor(context, seat.gender).withValues(alpha: 0.96),
+                  _seatColor(context, seat.gender).withValues(alpha: 0.84),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.8),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 6),
+                ),
               ],
             ),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.8),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.08),
-                blurRadius: 10,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                seat.number,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    seat.name.isEmpty ? '空位' : seat.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 21,
-                      fontWeight: FontWeight.w800,
-                      height: 1.1,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  seat.number,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      seat.name.isEmpty ? '空位' : seat.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    );
-    if (!editable) return card;
+      );
+    }
+
+    final card = buildCard();
+    if (!draggable) return card;
     return Draggable<int>(
       data: index,
       feedback: Material(
@@ -3760,31 +3791,11 @@ class _SeatCard extends StatelessWidget {
         child: SizedBox(
           width: 150,
           height: 108,
-          child: Opacity(opacity: 0.82, child: card),
+          child: Opacity(opacity: 0.78, child: buildCard()),
         ),
       ),
-      childWhenDragging: Opacity(opacity: 0.3, child: card),
-      child: DragTarget<int>(
-        onWillAcceptWithDetails: (details) => details.data != index,
-        onAcceptWithDetails: (details) {
-          final sourceIndex = details.data;
-          if (sourceIndex == index) return;
-          state.swapSeats(sourceIndex, index);
-        },
-        builder: (context, candidates, rejected) => AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: candidates.isEmpty
-              ? null
-              : BoxDecoration(
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.primary,
-                    width: 3,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-          child: card,
-        ),
-      ),
+      childWhenDragging: Opacity(opacity: 0.3, child: buildCard()),
+      child: card,
     );
   }
 
@@ -5064,7 +5075,7 @@ class _SeatAdminPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          Expanded(child: _SeatRows(state: state, editable: true)),
+          Expanded(child: _SeatRows(state: state, editable: true, draggable: true)),
         ],
       ),
     );

@@ -88,7 +88,9 @@ ngrok http http://localhost:3000 --host-header=rewrite
 - 查看分數 → 讀 `seats` / `cleanlinessRecords`
 - 查看今日簽到時間 → 讀 `attendanceRecords`
 - 查看被記 → 讀 `studentRecords`
-- 被記 30 吵鬧 → 寫入 `studentRecords`、扣除該生 1 分，並同步回軟體
+- 秩序不佳 30 吵鬧 → 寫入 `studentRecords`（類型為「秩序不佳」、備註為「吵鬧」）、扣除該生 1 分，並同步回軟體
+- 晚進教室 30 → 寫入 `studentRecords`、扣除該生 1 分，並同步回軟體
+- 整潔 30 優秀 → 寫入 `studentRecords`（類型為「整潔」、備註為「優秀」）
 
 ## 5. 目前支援的關鍵字
 
@@ -98,7 +100,7 @@ ngrok http http://localhost:3000 --host-header=rewrite
 - 查看分數
 - 查看今日簽到時間
 - 查看被記
-- 被記 + 座號 + 原因（例如：`被記 30 吵鬧`）
+- 秩序不佳／晚進教室／整潔 + 座號 + 備註（例如：`秩序不佳 30 吵鬧`）
 - 你好
 
 ## 6. 你現在最需要做的事

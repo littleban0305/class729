@@ -339,7 +339,7 @@ async function fetchClassData(classId) {
     }
 }
 
-async function addDisciplineRecord(classId, studentNumber, note) {
+async function addDisciplineRecord(classId, studentNumber, type, note) {
     const db = initFirebase();
     const id = normalizeClassId(classId || DEFAULT_CLASS_ID || '729');
     const stateRef = db.collection('classes').doc(id).collection('private').doc('state');
@@ -358,10 +358,12 @@ async function addDisciplineRecord(classId, studentNumber, note) {
         studentName: toPlainLine(seat.name),
         date: getTodayKey(now),
         time: now.toTimeString().slice(0, 8),
-        type: '被記扣分',
-        note: toPlainLine(note) || 'LINE 被記',
+        type,
+        note: toPlainLine(note) || `LINE ${type}`,
     });
-    seat.score = Number(seat.score ?? 0) - 1;
+    if (type === '秩序不佳' || type === '晚進教室') {
+        seat.score = Number(seat.score ?? 0) - 1;
+    }
 
     await stateRef.set({
         seats,
@@ -395,12 +397,23 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
         return `已記住你的座號 ${text}。`;
     }
 
-    const addDisciplineMatch = text.match(/^(?:新增?被記|被記|記錄)\s*(?:座號|學號)?\s*(\d{1,3})\s*(?:號)?\s*(.*)$/i);
-    if (addDisciplineMatch) {
+    const numberMatch = text.match(/(?:座號|學號)?\s*(\d{1,3})\s*(?:號)?/);
+    const isQuery = /^(查看|查詢)/i.test(text);
+    const recordType = text.includes('整潔')
+        ? '整潔'
+        : text.includes('晚進教室')
+            ? '晚進教室'
+            : (text.includes('秩序不佳') || text.includes('被記') ? '秩序不佳' : '');
+    const cleanlinessRating = text.match(/優秀|待改進/)?.[0] || '';
+    if (!isQuery && numberMatch && recordType) {
         const classId = resolveClassId(text, fallbackClassId);
-        const result = await addDisciplineRecord(classId, addDisciplineMatch[1], addDisciplineMatch[2]);
-        if (!result) return `找不到 ${addDisciplineMatch[1]} 號學生。`;
-        return `已記 ${result.number} ${result.name || '同學'}，目前 ${result.score} 分。`;
+        const note = cleanlinessRating || text
+            .replace(numberMatch[0], '')
+            .replace(/^(新增?被記|被記|記錄|秩序不佳|晚進教室|整潔)/i, '')
+            .trim();
+        const result = await addDisciplineRecord(classId, numberMatch[1], recordType, note);
+        if (!result) return `找不到 ${numberMatch[1]} 號學生。`;
+        return `已記 ${recordType}：${result.number} ${result.name || '同學'}，目前 ${result.score} 分。`;
     }
 
     const normalized = text.toLowerCase();

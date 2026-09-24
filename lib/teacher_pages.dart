@@ -220,9 +220,18 @@ class _StudentRecordsPageState extends State<StudentRecordsPage> {
   SeatData? student;
   final noteController = TextEditingController();
 
-  static const types = ['整潔', '秩序不佳', '晚進教室', '缺交作業'];
+  static const types = ['整潔', '秩序不佳', '晚進教室'];
 
   List<String> get availableTypes => widget.visibleTypes ?? types;
+
+  List<SeatData> get availableStudents {
+    final unique = <String, SeatData>{};
+    for (final student in _students(widget.state)) {
+      final key = student.number.trim().isEmpty ? student.name.trim() : student.number.trim();
+      if (key.isNotEmpty) unique.putIfAbsent(key, () => student);
+    }
+    return unique.values.toList();
+  }
 
   @override
   void initState() {
@@ -256,7 +265,7 @@ class _StudentRecordsPageState extends State<StudentRecordsPage> {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: typeValue,
-                items: const ['整潔', '秩序不佳', '晚進教室', '缺交作業']
+                items: const ['整潔', '秩序不佳', '晚進教室']
                     .map((value) => DropdownMenuItem(value: value, child: Text(value)))
                     .toList(),
                 onChanged: (value) => setDialogState(() => typeValue = value ?? typeValue),
@@ -288,6 +297,16 @@ class _StudentRecordsPageState extends State<StudentRecordsPage> {
   @override
   Widget build(BuildContext context) {
     final records = widget.state.studentRecords.where((record) => availableTypes.contains(record.type)).toList();
+    final students = availableStudents;
+    SeatData? selectedStudent;
+    if (student != null) {
+      for (final item in students) {
+        if (item.number == student!.number) {
+          selectedStudent = item;
+          break;
+        }
+      }
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -303,11 +322,9 @@ class _StudentRecordsPageState extends State<StudentRecordsPage> {
                   items: availableTypes.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
                   onChanged: (v) => setState(() => type = v ?? type)),
             DropdownButton<SeatData>(
-                value: student,
+                value: selectedStudent,
                 hint: const Text('選擇同學'),
-                items: _students(widget.state)
-                    .map((e) => DropdownMenuItem(value: e, child: Text('${e.number}  ${e.name}')))
-                    .toList(),
+                items: students.map((e) => DropdownMenuItem(value: e, child: Text('${e.number}  ${e.name}'))).toList(),
                 onChanged: (v) => setState(() => student = v)),
             FilledButton.icon(
                 onPressed: student == null ? null : _add, icon: const Icon(Icons.add), label: const Text('登記')),

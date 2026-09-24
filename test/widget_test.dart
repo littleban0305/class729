@@ -354,6 +354,24 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget);
   });
 
+  testWidgets('big screen diary entries display daily numbers', (WidgetTester tester) async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+
+    final state = AppState();
+    state.deviceRole = 'bigscreen';
+    final now = DateTime.now();
+    final today =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    state.diaryEntries = [
+      DiaryEntry(date: today, tag: '數學', content: '數學作業'),
+    ];
+    await tester.pumpWidget(MaterialApp(home: DiaryPage(state: state)));
+    await tester.pump();
+
+    expect(find.text('1. 數學作業'), findsOneWidget);
+  });
+
   test('moving a seat to an empty slot preserves its seat number', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});

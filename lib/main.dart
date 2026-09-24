@@ -4242,7 +4242,9 @@ class _DiaryPageState extends State<DiaryPage> {
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
-                          entries[index].content,
+                          widget.state.deviceRole == 'bigscreen'
+                              ? '${index + 1}. ${entries[index].content}'
+                              : entries[index].content,
                           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                         ),
                       ),

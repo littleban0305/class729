@@ -167,7 +167,7 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
                 const teacher = entry.teacher ? ` (${entry.teacher})` : '';
                 return `星期${DAY_NAMES[entry.weekday] || entry.weekday + 1}\n第${entry.lesson + 1}節 ${time}\n${entry.subject || '未命名'}${teacher}`;
             }).join('\n\n');
-            return `今天沒有排課；目前可用課表：\n${preview}`;
+            return `今天沒有排課；目前可用課表：\n-------------------------\n${preview.replace(/\n\n/g, '\n-------------------------\n')}`;
         }
 
         const lessonText = todayLessons.map((entry) => {
@@ -175,7 +175,7 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
             const teacher = entry.teacher ? ` (${entry.teacher})` : '';
             return `第${entry.lesson + 1}節 ${time}\n${entry.subject || '未命名'}${teacher}`;
         }).join('\n\n');
-        return `今天的課表：\n${lessonText}`;
+        return `今天的課表：\n-------------------------\n${lessonText.replace(/\n\n/g, '\n-------------------------\n')}`;
     }
 
     if (type === 'diary') {
@@ -187,7 +187,9 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
             return '今天沒有聯絡簿內容。';
         }
 
-        return `今天的聯絡簿：\n${todayEntries.map((entry, index) => `${index + 1}. ${entry.content || '無內容'}（${entry.tag || '一般'}）`).join('\n')}`;
+        return `今天的聯絡簿：\n-------------------------\n${todayEntries
+            .map((entry, index) => `${index + 1}. ${entry.content || '無內容'}`)
+            .join('\n')}`;
     }
 
     if (type === 'score') {

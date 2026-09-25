@@ -6,6 +6,7 @@ test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
     const data = {
         diaryEntries: [
             { date: '2026-09-10', tag: '一般', content: '請準時交作業' },
+            { date: '2026-09-10', tag: '一般', content: '1. 請準時交作業' },
         ],
         scheduleEntries: [
             { weekday: 0, lesson: 0, subject: '國文', teacher: '王老師', startTime: '08:00', endTime: '08:40' },
@@ -28,6 +29,7 @@ test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
     assert.match(markdown, /【聯絡簿】/);
     assert.match(markdown, /### 2026-09-10/);
     assert.match(markdown, /1\. 請準時交作業/);
+    assert.doesNotMatch(markdown, /1\. 1\./);
     assert.match(markdown, /【課表】/);
     assert.match(markdown, /【分數】/);
     assert.match(markdown, /【簽到】/);

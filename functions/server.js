@@ -195,6 +195,10 @@ function buildWeekScheduleTable(entries) {
     return [formatRow(headers), separator, ...rows.map(formatRow)].join('\n');
 }
 
+function stripLeadingListNumber(text) {
+    return String(text ?? '').replace(/^\s*(?:\d+[\.)]\s+)/, '').trim();
+}
+
 function getPublicBaseUrl() {
     const configured = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || process.env.LINE_PUBLIC_URL || `http://localhost:${PORT}`;
     return configured.replace(/\/$/, '');
@@ -232,6 +236,7 @@ function markdownToHtml(markdown) {
     const lines = (markdown || '').replace(/\r/g, '').split('\n');
     const html = [];
     let listItems = [];
+    let orderedListItems = [];
     let tableRows = [];
     let paragraphBuffer = [];
 
@@ -243,9 +248,14 @@ function markdownToHtml(markdown) {
     };
 
     const flushList = () => {
-        if (!listItems.length) return;
-        html.push(`<ul>${listItems.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join('')}</ul>`);
-        listItems = [];
+        if (listItems.length) {
+            html.push(`<ul>${listItems.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join('')}</ul>`);
+            listItems = [];
+        }
+        if (orderedListItems.length) {
+            html.push(`<ol>${orderedListItems.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join('')}</ol>`);
+            orderedListItems = [];
+        }
     };
 
     const flushTable = () => {
@@ -306,7 +316,20 @@ function markdownToHtml(markdown) {
             continue;
         }
 
+        if (/^\d+[\.)]\s+/.test(trimmed)) {
+            flushParagraph();
+            if (tableRows.length) {
+                flushTable();
+            }
+            orderedListItems.push(trimmed.replace(/^\d+[\.)]\s+/, ''));
+            continue;
+        }
+
         if (listItems.length) {
+            flushList();
+        }
+
+        if (orderedListItems.length) {
             flushList();
         }
 
@@ -349,7 +372,7 @@ function buildDiaryHistoryText(data) {
         .map((entry) => ({
             date: normalizeDateKey(entry.date) || toPlainLine(entry.date) || '日期未填',
             tag: entry.tag || '一般',
-            content: entry.content || '無內容',
+            content: stripLeadingListNumber(entry.content || '無內容'),
         }))
         .sort((a, b) => b.date.localeCompare(a.date));
 
@@ -994,7 +1017,7 @@ app.get('/history/:fileName', (req, res) => {
       }
       table {
         width: 100%;
-        min-width: 680px;
+                min-width: 760px;
         border-collapse: collapse;
         overflow: hidden;
         border: 1px solid var(--border);

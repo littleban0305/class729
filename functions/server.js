@@ -227,34 +227,39 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
                 late: !!entry.late,
             }))
             .filter((entry) => entry.date === todayKey)
+            .filter((entry) => !studentNumber || entry.studentNumber === studentNumber)
             .slice(0, 5);
 
         if (!records.length) {
-            return '今天還沒有簽到紀錄。';
+            return studentNumber ? '你今天還沒有簽到紀錄。' : '今天還沒有簽到紀錄。';
         }
 
+        if (studentNumber) {
+            return `你今天到教室的時間：${records[0].time}`;
+        }
         return `今日簽到：\n${records.map((entry) => `${entry.studentName || entry.studentNumber || '學生'} ${entry.time}${entry.late ? '（遲到）' : ''}`).join('\n')}`;
     }
 
     if (type === 'discipline') {
+        const todayKey = getTodayKey();
         const allRecords = asArray(data?.studentRecords)
             .filter((entry) => entry && typeof entry === 'object')
             .map((entry) => ({
                 studentNumber: toPlainLine(entry.studentNumber),
-                studentName: toPlainLine(entry.studentName),
                 date: toPlainLine(entry.date),
+                time: toPlainLine(entry.time),
                 type: toPlainLine(entry.type),
                 note: toPlainLine(entry.note),
             }));
         const records = (studentNumber
-            ? allRecords.filter((entry) => entry.studentNumber === studentNumber)
-            : allRecords).slice(0, 3);
+            ? allRecords.filter((entry) => entry.studentNumber === studentNumber && entry.date === todayKey)
+            : allRecords.filter((entry) => entry.date === todayKey)).slice(0, 10);
 
         if (!records.length) {
-            return '目前沒有被記紀錄。';
+            return '你今天沒有被登記！';
         }
 
-        return `被記紀錄：\n${records.map((entry) => `${entry.studentName || '學生'} ${entry.date}：${entry.type || '紀錄'}${entry.note ? ` / ${entry.note}` : ''}`).join('\n')}`;
+        return `今天的被記紀錄：\n${records.map((entry, index) => `${index + 1}. ${entry.time || '時間未記錄'}：${entry.type || '紀錄'}${entry.note ? ` / ${entry.note}` : ''}`).join('\n')}`;
     }
 
     return '沒有對應資料。';
@@ -402,10 +407,17 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
             return '錯誤，請輸入你的座號，例如30號填寫30。';
         }
 
+        const awaitingType = profile.awaitingStudentNumberType || '';
         await saveLineUserProfile(userId, {
             studentNumber: text,
             awaitingStudentNumber: false,
+            awaitingStudentNumberType: null,
         });
+        if (awaitingType) {
+            const data = await fetchClassData(DEFAULT_CLASS_ID);
+            if (!data || data.__firebaseError) return data?.__errorMessage || 'Firebase 讀取失敗';
+            return buildReplyTextForData(awaitingType, data, DEFAULT_CLASS_ID, text);
+        }
         return `已記住你的座號 ${text}。`;
     }
 
@@ -437,7 +449,7 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
             }
 
             let studentNumber = '';
-            if (item.type === 'score' || item.type === 'discipline') {
+            if (item.type === 'score' || item.type === 'discipline' || item.type === 'attendance') {
                 studentNumber = toPlainLine(profile?.studentNumber);
 
                 if (!studentNumber) {
@@ -448,9 +460,20 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
                             await saveLineUserProfile(userId, {
                                 studentNumber,
                                 awaitingStudentNumber: false,
+                                awaitingStudentNumberType: null,
                             });
                         }
                     }
+                }
+
+                if ((item.type === 'attendance' || item.type === 'discipline') && !studentNumber) {
+                    if (userId) {
+                        await saveLineUserProfile(userId, {
+                            awaitingStudentNumber: true,
+                            awaitingStudentNumberType: item.type,
+                        });
+                    }
+                    return '請問你是幾號？例如30號填寫30';
                 }
 
             }

@@ -217,7 +217,7 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
 
     if (type === 'attendance') {
         const todayKey = getTodayKey();
-        const records = asArray(data?.attendanceRecords)
+        const records = asArray(data?.attendanceRecords ?? data?.attendanceToday)
             .filter((entry) => entry && typeof entry === 'object')
             .map((entry) => ({
                 studentName: toPlainLine(entry.studentName),

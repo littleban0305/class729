@@ -26,11 +26,15 @@ test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
 
     const markdown = buildHistoryMarkdown(data, '729', '30');
     assert.match(markdown, /【聯絡簿】/);
+    assert.match(markdown, /### 2026-09-10/);
+    assert.match(markdown, /1\. 請準時交作業/);
     assert.match(markdown, /【課表】/);
     assert.match(markdown, /【分數】/);
     assert.match(markdown, /【簽到】/);
     assert.match(markdown, /【登記】/);
     assert.match(markdown, /目前分數/);
+    assert.doesNotMatch(markdown, /小明/);
+    assert.doesNotMatch(markdown, /小華/);
 
     const reply = await buildReply('歷史', '729', 'user-1');
     assert.equal(reply.kind, 'history');

@@ -150,7 +150,6 @@ function escapeMarkdownCell(value) {
 }
 
 function buildWeekScheduleTable(entries) {
-    const weekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
     const sortedEntries = asArray(entries)
         .filter((entry) => entry && typeof entry === 'object')
         .map((entry) => ({
@@ -167,24 +166,24 @@ function buildWeekScheduleTable(entries) {
         return '目前沒有課表資料。';
     }
 
-    const maxLesson = Math.max(...sortedEntries.map((entry) => entry.lesson + 1), 1);
+    const headers = ['節次', '週一', '週二', '週三', '週四', '週五', '週六', '週日'];
     const rows = [];
-    for (let lesson = 0; lesson < maxLesson; lesson += 1) {
-        const row = ['第' + (lesson + 1) + '節'];
+
+    for (let lesson = 0; lesson < 8; lesson += 1) {
+        const row = [`第${lesson + 1}節`];
         for (let weekday = 0; weekday < 7; weekday += 1) {
-            const cellEntries = sortedEntries.filter((entry) => entry.weekday === weekday && entry.lesson === lesson);
-            const cellText = cellEntries.map((entry) => {
-                const subject = entry.subject || '未排課';
-                const teacher = entry.teacher ? `（${entry.teacher}）` : '';
-                const time = entry.startTime && entry.endTime ? ` ${entry.startTime}-${entry.endTime}` : '';
-                return `${subject}${teacher}${time}`;
-            }).join('<br>');
-            row.push(cellText || '—');
+            const match = sortedEntries.find((entry) => entry.weekday === weekday && entry.lesson === lesson);
+            if (!match) {
+                row.push('—');
+                continue;
+            }
+            const time = match.startTime && match.endTime ? `${match.startTime}-${match.endTime}` : '時間未定';
+            const teacher = match.teacher ? `（${match.teacher}）` : '';
+            row.push(`${match.subject || '未排課'}${teacher}\n${time}`);
         }
         rows.push(row);
     }
 
-    const headers = ['節次', '週一', '週二', '週三', '週四', '週五', '週六', '週日'];
     const columnWidths = headers.map((header, index) => {
         const maxCellLength = Math.max(header.length, ...rows.map((row) => escapeMarkdownCell(row[index]).length));
         return Math.max(6, maxCellLength + 2);
@@ -254,7 +253,7 @@ function markdownToHtml(markdown) {
         const rows = tableRows.map((row) => row.map((cell) => formatInlineMarkdown(cell)).join('</td><td>'));
         const head = rows[0];
         const body = rows.slice(1);
-        html.push('<table><thead><tr><th>' + head + '</th></tr></thead><tbody>' + body.map((row) => '<tr><td>' + row + '</td></tr>').join('') + '</tbody></table>');
+        html.push('<div class="table-scroll"><table><thead><tr><th>' + head + '</th></tr></thead><tbody>' + body.map((row) => '<tr><td>' + row + '</td></tr>').join('') + '</tbody></table></div>');
         tableRows = [];
     };
 
@@ -345,6 +344,36 @@ function buildHistoryReplyPayload(data, classId = DEFAULT_CLASS_ID, studentNumbe
     };
 }
 
+function buildDiaryHistoryText(data) {
+    const diaryEntries = getDiaryEntries(data)
+        .map((entry) => ({
+            date: normalizeDateKey(entry.date) || toPlainLine(entry.date) || '日期未填',
+            tag: entry.tag || '一般',
+            content: entry.content || '無內容',
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+
+    if (!diaryEntries.length) {
+        return '- 無聯絡簿紀錄';
+    }
+
+    const grouped = {};
+    for (const entry of diaryEntries) {
+        if (!grouped[entry.date]) {
+            grouped[entry.date] = [];
+        }
+        grouped[entry.date].push(entry);
+    }
+
+    return Object.entries(grouped)
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([date, entries]) => {
+            const lines = entries.map((entry, index) => `${index + 1}. ${entry.content}${entry.tag && entry.tag !== '一般' ? `（${entry.tag}）` : ''}`);
+            return `### ${date}\n${lines.join('\n')}`;
+        })
+        .join('\n\n');
+}
+
 function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = '') {
     const seatRecords = asArray(data?.seats)
         .filter((entry) => entry && typeof entry === 'object')
@@ -360,10 +389,12 @@ function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = 
         ? seatRecords.filter((entry) => entry.number === targetStudentNumber)
         : seatRecords;
     const currentScoreSummary = filteredSeats.length
-        ? filteredSeats.map((seat) => `${seat.name || seat.number || '學生'}：${seat.score} 分`).join('；')
+        ? (targetStudentNumber
+            ? `${filteredSeats[0].score} 分`
+            : filteredSeats.map((seat) => `${seat.name || seat.number || '學生'}：${seat.score} 分`).join('；'))
         : '目前尚無分數資料';
 
-    const diaryEntries = getDiaryEntries(data).map((entry) => `- ${normalizeDateKey(entry.date) || '日期未填'} | ${entry.tag || '一般'} | ${entry.content || '無內容'}`).join('\n');
+    const diaryEntriesText = buildDiaryHistoryText(data);
     const scheduleEntries = asArray(data?.scheduleEntries)
         .filter((entry) => entry && typeof entry === 'object')
         .map((entry) => ({
@@ -387,7 +418,7 @@ function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = 
         }))
         .filter((entry) => (!targetStudentNumber || entry.studentNumber === targetStudentNumber));
     const attendanceText = attendanceEntries.length
-        ? attendanceEntries.map((entry) => `- ${entry.date || '日期未填'} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.time || '時間未填'}${entry.late ? '（遲到）' : '（準時）'}`).join('\n')
+        ? attendanceEntries.map((entry) => `- ${entry.date || '日期未填'} | ${entry.time || '時間未填'}${entry.late ? '（遲到）' : '（準時）'}`).join('\n')
         : '- 無簽到紀錄';
 
     const registrationEntries = asArray(data?.studentRecords)
@@ -403,11 +434,11 @@ function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = 
         .filter((entry) => !targetStudentNumber || entry.studentNumber === targetStudentNumber)
         .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
     const registrationText = registrationEntries.length
-        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
+        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
         : '- 無登記紀錄';
 
     const scoreEntries = registrationEntries.length
-        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
+        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
         : '- 無加減分紀錄';
 
     const historyMarkdown = [
@@ -415,7 +446,7 @@ function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = 
         `> 產生時間：${new Date().toLocaleString('zh-TW')}`,
         '',
         '## 【聯絡簿】',
-        diaryEntries || '- 無聯絡簿紀錄',
+        diaryEntriesText,
         '',
         '## 【課表】',
         buildWeekScheduleTable(scheduleEntries),
@@ -955,10 +986,16 @@ app.get('/history/:fileName', (req, res) => {
         border-left: 4px solid var(--accent);
         background: #f3f7ff;
       }
+      .table-scroll {
+        width: 100%;
+        overflow-x: auto;
+        margin: 0.8rem 0;
+        -webkit-overflow-scrolling: touch;
+      }
       table {
         width: 100%;
+        min-width: 680px;
         border-collapse: collapse;
-        margin: 0.8rem 0;
         overflow: hidden;
         border: 1px solid var(--border);
         table-layout: fixed;

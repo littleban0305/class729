@@ -922,49 +922,55 @@ app.get('/history/:fileName', (req, res) => {
         background: var(--bg);
         color: var(--text);
         font-family: "Segoe UI", "Noto Sans TC", sans-serif;
-        line-height: 1.7;
+        line-height: 1.6;
+        font-size: 15px;
       }
       .container {
         max-width: 980px;
-        margin: 32px auto;
-        padding: 24px 20px 48px;
+        margin: 20px auto;
+        padding: 18px 16px 32px;
         background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 16px;
-        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+        border-radius: 14px;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
       }
       h1, h2, h3, h4, h5, h6 {
         color: var(--text);
-        margin-top: 1.5em;
-        margin-bottom: 0.7em;
+        margin-top: 1.2em;
+        margin-bottom: 0.65em;
+        line-height: 1.3;
       }
-      h1 { font-size: 2rem; }
-      h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+      h1 { font-size: 1.7rem; }
+      h2 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
       p, li, blockquote, code {
-        font-size: 1rem;
+        font-size: 0.94rem;
       }
       ul, ol {
-        padding-left: 1.5rem;
+        padding-left: 1.2rem;
       }
       blockquote {
-        margin: 1rem 0;
+        margin: 0.8rem 0;
         color: var(--muted);
-        padding-left: 1rem;
+        padding: 0.5rem 0.8rem;
         border-left: 4px solid var(--accent);
         background: #f3f7ff;
       }
       table {
         width: 100%;
         border-collapse: collapse;
-        margin: 1rem 0;
+        margin: 0.8rem 0;
         overflow: hidden;
         border: 1px solid var(--border);
+        table-layout: fixed;
+        font-size: 0.88rem;
       }
       th, td {
         border: 1px solid var(--border);
-        padding: 10px 12px;
+        padding: 8px 10px;
         vertical-align: top;
         text-align: left;
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
       th {
         background: #f3f7ff;
@@ -973,12 +979,17 @@ app.get('/history/:fileName', (req, res) => {
       code {
         background: #f5f7fb;
         border-radius: 4px;
-        padding: 2px 6px;
+        padding: 2px 5px;
         font-family: Consolas, "Courier New", monospace;
       }
       .meta {
         color: var(--muted);
-        margin-bottom: 1.5rem;
+        margin-bottom: 1rem;
+      }
+      @media (max-width: 560px) {
+        body { font-size: 14px; }
+        .container { padding: 14px 12px 20px; }
+        table { font-size: 0.8rem; }
       }
     </style>
   </head>

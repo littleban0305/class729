@@ -6,6 +6,7 @@ const admin = require('firebase-admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HISTORY_EXPORT_DIR = path.join(__dirname, 'history_exports');
 
 const LINE_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 const LINE_SECRET = process.env.LINE_CHANNEL_SECRET || '';
@@ -195,15 +196,33 @@ function buildWeekScheduleTable(entries) {
     return [formatRow(headers), separator, ...rows.map(formatRow)].join('\n');
 }
 
+function getPublicBaseUrl() {
+    const configured = process.env.PUBLIC_BASE_URL || process.env.BASE_URL || process.env.LINE_PUBLIC_URL || `http://localhost:${PORT}`;
+    return configured.replace(/\/$/, '');
+}
+
 function saveHistoryMarkdown(content, classId = DEFAULT_CLASS_ID) {
-    const exportDir = path.join(__dirname, 'history_exports');
-    fs.mkdirSync(exportDir, { recursive: true });
+    fs.mkdirSync(HISTORY_EXPORT_DIR, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeClassId = normalizeText(classId || DEFAULT_CLASS_ID || '729').replace(/[^A-Za-z0-9_-]/g, '_') || '729';
     const fileName = `history_${safeClassId}_${timestamp}.md`;
-    const fullPath = path.join(exportDir, fileName);
+    const fullPath = path.join(HISTORY_EXPORT_DIR, fileName);
     fs.writeFileSync(fullPath, content, 'utf8');
     return { fileName, fullPath, relativePath: path.relative(process.cwd(), fullPath) };
+}
+
+function buildHistoryReplyPayload(data, classId = DEFAULT_CLASS_ID, studentNumber = '') {
+    const markdown = buildHistoryMarkdown(data, classId, studentNumber);
+    const saved = saveHistoryMarkdown(markdown, classId);
+    const publicBaseUrl = getPublicBaseUrl();
+    const fileUrl = `${publicBaseUrl}/history/${encodeURIComponent(saved.fileName)}`;
+    return {
+        kind: 'history',
+        text: '你可以點擊以下檔案來查看歷史',
+        fileName: saved.fileName,
+        fileUrl,
+        filePath: saved.fullPath,
+    };
 }
 
 function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = '') {
@@ -420,10 +439,7 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
     }
 
     if (type === 'history') {
-        const markdown = buildHistoryMarkdown(data, classId, studentNumber);
-        const saved = saveHistoryMarkdown(markdown, classId);
-        const preview = markdown.length > 500 ? `${markdown.slice(0, 500).trim()}\n...（內容已存成 ${saved.fileName}）` : markdown;
-        return `已整理歷史紀錄，檔案已自動生成：${saved.fileName}\n\n${preview}`;
+        return buildHistoryReplyPayload(data, classId, studentNumber).text;
     }
 
     return '沒有對應資料。';
@@ -622,6 +638,19 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
                 return item.reply;
             }
 
+            if (item.type === 'history') {
+                const classId = resolveClassId(text, fallbackClassId);
+                const data = await fetchClassData(classId);
+                const fallbackData = {
+                    diaryEntries: [],
+                    scheduleEntries: [],
+                    seats: [],
+                    attendanceRecords: [],
+                    studentRecords: [],
+                };
+                return buildHistoryReplyPayload(data || fallbackData, classId, profile?.studentNumber || '');
+            }
+
             let studentNumber = '';
             if (item.type === 'score' || item.type === 'discipline' || item.type === 'attendance') {
                 studentNumber = toPlainLine(profile?.studentNumber);
@@ -674,15 +703,28 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
     return null;
 }
 
-function sendLineReply(userId, replyText) {
+function sendLineReply(userId, replyPayload) {
     if (!LINE_ACCESS_TOKEN || !userId) {
-        console.log('[LINE] fake reply ->', { userId, replyText });
+        console.log('[LINE] fake reply ->', { userId, replyPayload });
         return Promise.resolve();
+    }
+
+    let messages = [{ type: 'text', text: String(replyPayload || '') }];
+
+    if (replyPayload && typeof replyPayload === 'object' && replyPayload.kind === 'history') {
+        messages = [
+            { type: 'text', text: replyPayload.text || '你可以點擊以下檔案來查看歷史' },
+            {
+                type: 'file',
+                fileName: replyPayload.fileName || 'history.md',
+                fileUrl: replyPayload.fileUrl || `http://localhost:${PORT}/history/${encodeURIComponent(replyPayload.fileName || 'history.md')}`,
+            },
+        ];
     }
 
     const payload = JSON.stringify({
         to: userId,
-        messages: [{ type: 'text', text: replyText }],
+        messages,
     });
 
     const options = {
@@ -733,6 +775,20 @@ app.get('/', (_req, res) => {
     res.json({ ok: true, message: '729 LINE webhook is running.', mode: 'ngrok-free', defaultClassId: DEFAULT_CLASS_ID });
 });
 
+app.get('/history/:fileName', (req, res) => {
+    const fileName = path.basename(req.params.fileName || '');
+    if (!fileName) {
+        return res.status(400).send('缺少檔名');
+    }
+
+    const filePath = path.join(HISTORY_EXPORT_DIR, fileName);
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).send('找不到歷史檔案');
+    }
+
+    return res.download(filePath, fileName);
+});
+
 app.post('/webhook', async (req, res) => {
     try {
         const body = req.body || {};
@@ -752,11 +808,11 @@ app.post('/webhook', async (req, res) => {
 
             const text = event.message.text || '';
             const userId = event.source?.userId || null;
-            const replyText = await buildReply(text, DEFAULT_CLASS_ID, userId);
+            const replyPayload = await buildReply(text, DEFAULT_CLASS_ID, userId);
 
             console.log('[webhook] message:', text, 'userId:', userId);
-            if (replyText) {
-                await sendLineReply(userId, replyText);
+            if (replyPayload) {
+                await sendLineReply(userId, replyPayload);
             }
         }
 

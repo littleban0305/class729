@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildReply, buildHistoryMarkdown } = require('./server');
 
-test('歷史關鍵字應回傳含有五個區段的歷史紀錄', async () => {
+test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
     const data = {
         diaryEntries: [
             { date: '2026-09-10', tag: '一般', content: '請準時交作業' },
@@ -33,5 +33,7 @@ test('歷史關鍵字應回傳含有五個區段的歷史紀錄', async () => {
     assert.match(markdown, /目前分數/);
 
     const reply = await buildReply('歷史', '729', 'user-1');
-    assert.ok(reply && reply.includes('【聯絡簿】'));
+    assert.equal(reply.kind, 'history');
+    assert.equal(reply.text, '你可以點擊以下檔案來查看歷史');
+    assert.match(reply.fileUrl, /\/history\//);
 });

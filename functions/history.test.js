@@ -31,6 +31,9 @@ test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
     assert.match(markdown, /1\. 請準時交作業/);
     assert.doesNotMatch(markdown, /1\. 1\./);
     assert.match(markdown, /【課表】/);
+    assert.match(markdown, /第1節\s+08:00-08:40/);
+    assert.match(markdown, /國文（王老師）/);
+    assert.doesNotMatch(markdown, /國文（王老師）\s+08:00-08:40/);
     assert.match(markdown, /【分數】/);
     assert.match(markdown, /【簽到】/);
     assert.match(markdown, /【登記】/);

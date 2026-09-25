@@ -170,16 +170,21 @@ function buildWeekScheduleTable(entries) {
     const rows = [];
 
     for (let lesson = 0; lesson < 8; lesson += 1) {
-        const row = [`第${lesson + 1}節`];
+        const lessonTimes = Array.from(new Set(sortedEntries
+            .filter((entry) => entry.lesson === lesson && entry.startTime && entry.endTime)
+            .map((entry) => `${entry.startTime}-${entry.endTime}`)));
+        const lessonLabel = lessonTimes.length
+            ? `第${lesson + 1}節\n${lessonTimes.join('／')}`
+            : `第${lesson + 1}節`;
+        const row = [lessonLabel];
         for (let weekday = 0; weekday < 7; weekday += 1) {
             const match = sortedEntries.find((entry) => entry.weekday === weekday && entry.lesson === lesson);
             if (!match) {
                 row.push('—');
                 continue;
             }
-            const time = match.startTime && match.endTime ? `${match.startTime}-${match.endTime}` : '時間未定';
             const teacher = match.teacher ? `（${match.teacher}）` : '';
-            row.push(`${match.subject || '未排課'}${teacher}\n${time}`);
+            row.push(`${match.subject || '未排課'}${teacher}`);
         }
         rows.push(row);
     }
@@ -1017,7 +1022,7 @@ app.get('/history/:fileName', (req, res) => {
       }
       table {
         width: 100%;
-                min-width: 760px;
+                min-width: 860px;
         border-collapse: collapse;
         overflow: hidden;
         border: 1px solid var(--border);

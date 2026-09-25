@@ -34,6 +34,6 @@ test('歷史關鍵字應回傳短文字與可點擊檔案', async () => {
 
     const reply = await buildReply('歷史', '729', 'user-1');
     assert.equal(reply.kind, 'history');
-    assert.equal(reply.text, '你可以點擊以下檔案來查看歷史');
+    assert.equal(reply.text, '你可以點擊以下連結來查看歷史');
     assert.match(reply.fileUrl, /\/history\//);
 });

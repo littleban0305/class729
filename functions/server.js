@@ -218,7 +218,7 @@ function buildHistoryReplyPayload(data, classId = DEFAULT_CLASS_ID, studentNumbe
     const fileUrl = `${publicBaseUrl}/history/${encodeURIComponent(saved.fileName)}`;
     return {
         kind: 'history',
-        text: '你可以點擊以下檔案來查看歷史',
+        text: '你可以點擊以下連結來查看歷史',
         fileName: saved.fileName,
         fileUrl,
         filePath: saved.fullPath,
@@ -712,7 +712,7 @@ function sendLineReply(userId, replyPayload) {
     let text = String(replyPayload || '');
     if (replyPayload && typeof replyPayload === 'object' && replyPayload.kind === 'history') {
         const safeUrl = replyPayload.fileUrl || `http://localhost:${PORT}/history/${encodeURIComponent(replyPayload.fileName || 'history.md')}`;
-        text = `${replyPayload.text || '你可以點擊以下檔案來查看歷史'}\n${safeUrl}`;
+        text = `${replyPayload.text || '你可以點擊以下連結來查看歷史'}\n${safeUrl}`;
     }
 
     const payload = JSON.stringify({
@@ -779,7 +779,10 @@ app.get('/history/:fileName', (req, res) => {
         return res.status(404).send('找不到歷史檔案');
     }
 
-    return res.download(filePath, fileName);
+    const content = fs.readFileSync(filePath, 'utf8');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    return res.send(content);
 });
 
 app.post('/webhook', async (req, res) => {

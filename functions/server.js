@@ -709,22 +709,15 @@ function sendLineReply(userId, replyPayload) {
         return Promise.resolve();
     }
 
-    let messages = [{ type: 'text', text: String(replyPayload || '') }];
-
+    let text = String(replyPayload || '');
     if (replyPayload && typeof replyPayload === 'object' && replyPayload.kind === 'history') {
-        messages = [
-            { type: 'text', text: replyPayload.text || '你可以點擊以下檔案來查看歷史' },
-            {
-                type: 'file',
-                fileName: replyPayload.fileName || 'history.md',
-                fileUrl: replyPayload.fileUrl || `http://localhost:${PORT}/history/${encodeURIComponent(replyPayload.fileName || 'history.md')}`,
-            },
-        ];
+        const safeUrl = replyPayload.fileUrl || `http://localhost:${PORT}/history/${encodeURIComponent(replyPayload.fileName || 'history.md')}`;
+        text = `${replyPayload.text || '你可以點擊以下檔案來查看歷史'}\n${safeUrl}`;
     }
 
     const payload = JSON.stringify({
         to: userId,
-        messages,
+        messages: [{ type: 'text', text }],
     });
 
     const options = {

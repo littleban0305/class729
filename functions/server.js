@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const https = require('https');
 const admin = require('firebase-admin');
 
@@ -17,6 +19,8 @@ const ARG_COMMANDS = [
     '查看分數',
     '查看今日簽到時間',
     '查看被記',
+    '查看歷史',
+    '歷史',
 ];
 
 const KEYWORDS = [
@@ -25,6 +29,7 @@ const KEYWORDS = [
     { key: ['查看分數', '分數', 'score', 'grades'], type: 'score' },
     { key: ['查看今日簽到時間', '今日簽到時間', '簽到時間', 'attendance'], type: 'attendance' },
     { key: ['查看被記', '被記', '記錄', 'late', '登記'], type: 'discipline' },
+    { key: ['查看歷史', '歷史', 'history'], type: 'history' },
 ];
 
 function normalizeText(value) {
@@ -137,6 +142,158 @@ function resolveClassId(messageText, fallbackClassId = DEFAULT_CLASS_ID) {
 function toPlainLine(value) {
     if (value == null) return '';
     return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function escapeMarkdownCell(value) {
+    return String(value ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function buildWeekScheduleTable(entries) {
+    const weekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
+    const sortedEntries = asArray(entries)
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            weekday: Number(entry.weekday ?? 0),
+            lesson: Number(entry.lesson ?? 0),
+            subject: toPlainLine(entry.subject),
+            teacher: toPlainLine(entry.teacher),
+            startTime: toPlainLine(entry.startTime),
+            endTime: toPlainLine(entry.endTime),
+        }))
+        .sort((a, b) => a.weekday - b.weekday || a.lesson - b.lesson);
+
+    if (!sortedEntries.length) {
+        return '目前沒有課表資料。';
+    }
+
+    const maxLesson = Math.max(...sortedEntries.map((entry) => entry.lesson + 1), 1);
+    const rows = [];
+    for (let lesson = 0; lesson < maxLesson; lesson += 1) {
+        const row = ['第' + (lesson + 1) + '節'];
+        for (let weekday = 0; weekday < 7; weekday += 1) {
+            const cellEntries = sortedEntries.filter((entry) => entry.weekday === weekday && entry.lesson === lesson);
+            const cellText = cellEntries.map((entry) => {
+                const subject = entry.subject || '未排課';
+                const teacher = entry.teacher ? `（${entry.teacher}）` : '';
+                const time = entry.startTime && entry.endTime ? ` ${entry.startTime}-${entry.endTime}` : '';
+                return `${subject}${teacher}${time}`;
+            }).join('<br>');
+            row.push(cellText || '—');
+        }
+        rows.push(row);
+    }
+
+    const headers = ['節次', '週一', '週二', '週三', '週四', '週五', '週六', '週日'];
+    const columnWidths = headers.map((header, index) => {
+        const maxCellLength = Math.max(header.length, ...rows.map((row) => escapeMarkdownCell(row[index]).length));
+        return Math.max(6, maxCellLength + 2);
+    });
+
+    const formatRow = (values) => `| ${values.map((value, index) => escapeMarkdownCell(value).padEnd(columnWidths[index], ' ')).join(' | ')} |`;
+    const separator = `| ${columnWidths.map((width) => '-'.repeat(Math.max(3, width))).join(' | ')} |`;
+
+    return [formatRow(headers), separator, ...rows.map(formatRow)].join('\n');
+}
+
+function saveHistoryMarkdown(content, classId = DEFAULT_CLASS_ID) {
+    const exportDir = path.join(__dirname, 'history_exports');
+    fs.mkdirSync(exportDir, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeClassId = normalizeText(classId || DEFAULT_CLASS_ID || '729').replace(/[^A-Za-z0-9_-]/g, '_') || '729';
+    const fileName = `history_${safeClassId}_${timestamp}.md`;
+    const fullPath = path.join(exportDir, fileName);
+    fs.writeFileSync(fullPath, content, 'utf8');
+    return { fileName, fullPath, relativePath: path.relative(process.cwd(), fullPath) };
+}
+
+function buildHistoryMarkdown(data, classId = DEFAULT_CLASS_ID, studentNumber = '') {
+    const seatRecords = asArray(data?.seats)
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            number: toPlainLine(entry.number).replace(/^0+(?=\d)/, ''),
+            name: toPlainLine(entry.name),
+            score: Number(entry.score ?? 0),
+        }))
+        .filter((entry) => entry.number || entry.name || entry.score !== 0);
+
+    const targetStudentNumber = normalizeText(studentNumber).replace(/^0+(?=\d)/, '');
+    const filteredSeats = targetStudentNumber
+        ? seatRecords.filter((entry) => entry.number === targetStudentNumber)
+        : seatRecords;
+    const currentScoreSummary = filteredSeats.length
+        ? filteredSeats.map((seat) => `${seat.name || seat.number || '學生'}：${seat.score} 分`).join('；')
+        : '目前尚無分數資料';
+
+    const diaryEntries = getDiaryEntries(data).map((entry) => `- ${normalizeDateKey(entry.date) || '日期未填'} | ${entry.tag || '一般'} | ${entry.content || '無內容'}`).join('\n');
+    const scheduleEntries = asArray(data?.scheduleEntries)
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            weekday: Number(entry.weekday ?? 0),
+            lesson: Number(entry.lesson ?? 0),
+            subject: toPlainLine(entry.subject),
+            teacher: toPlainLine(entry.teacher),
+            startTime: toPlainLine(entry.startTime),
+            endTime: toPlainLine(entry.endTime),
+        }))
+        .sort((a, b) => a.weekday - b.weekday || a.lesson - b.lesson);
+
+    const attendanceEntries = asArray(data?.attendanceRecords ?? data?.attendanceToday)
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            studentNumber: toPlainLine(entry.studentNumber).replace(/^0+(?=\d)/, ''),
+            studentName: toPlainLine(entry.studentName),
+            date: normalizeDateKey(entry.date) || toPlainLine(entry.date),
+            time: toPlainLine(entry.time),
+            late: !!entry.late,
+        }))
+        .filter((entry) => (!targetStudentNumber || entry.studentNumber === targetStudentNumber));
+    const attendanceText = attendanceEntries.length
+        ? attendanceEntries.map((entry) => `- ${entry.date || '日期未填'} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.time || '時間未填'}${entry.late ? '（遲到）' : '（準時）'}`).join('\n')
+        : '- 無簽到紀錄';
+
+    const registrationEntries = asArray(data?.studentRecords)
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({
+            studentNumber: toPlainLine(entry.studentNumber).replace(/^0+(?=\d)/, ''),
+            studentName: toPlainLine(entry.studentName),
+            date: normalizeDateKey(entry.date) || toPlainLine(entry.date),
+            time: toPlainLine(entry.time),
+            type: toPlainLine(entry.type),
+            note: toPlainLine(entry.note),
+        }))
+        .filter((entry) => !targetStudentNumber || entry.studentNumber === targetStudentNumber)
+        .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.time || '').localeCompare(a.time || ''));
+    const registrationText = registrationEntries.length
+        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
+        : '- 無登記紀錄';
+
+    const scoreEntries = registrationEntries.length
+        ? registrationEntries.map((entry) => `- ${entry.date || '日期未填'} ${entry.time || ''} | ${entry.studentName || entry.studentNumber || '學生'} | ${entry.type || '紀錄'} | 原因：${entry.note || '無備註'}`).join('\n')
+        : '- 無加減分紀錄';
+
+    const historyMarkdown = [
+        `# 【${normalizeText(classId) || DEFAULT_CLASS_ID}】歷史紀錄`,
+        `> 產生時間：${new Date().toLocaleString('zh-TW')}`,
+        '',
+        '## 【聯絡簿】',
+        diaryEntries || '- 無聯絡簿紀錄',
+        '',
+        '## 【課表】',
+        buildWeekScheduleTable(scheduleEntries),
+        '',
+        '## 【分數】',
+        `目前分數：${currentScoreSummary}`,
+        scoreEntries,
+        '',
+        '## 【簽到】',
+        attendanceText,
+        '',
+        '## 【登記】',
+        registrationText,
+        '',
+    ].join('\n');
+
+    return historyMarkdown;
 }
 
 function buildReplyTextForData(type, data, classId, studentNumber = '') {
@@ -262,6 +419,13 @@ function buildReplyTextForData(type, data, classId, studentNumber = '') {
         return `今天的被記紀錄：\n${records.map((entry, index) => `${index + 1}. ${entry.time || '時間未記錄'}：${entry.type || '紀錄'}${entry.note ? ` / ${entry.note}` : ''}`).join('\n')}`;
     }
 
+    if (type === 'history') {
+        const markdown = buildHistoryMarkdown(data, classId, studentNumber);
+        const saved = saveHistoryMarkdown(markdown, classId);
+        const preview = markdown.length > 500 ? `${markdown.slice(0, 500).trim()}\n...（內容已存成 ${saved.fileName}）` : markdown;
+        return `已整理歷史紀錄，檔案已自動生成：${saved.fileName}\n\n${preview}`;
+    }
+
     return '沒有對應資料。';
 }
 
@@ -279,7 +443,7 @@ function initFirebase() {
         } else if (projectId) {
             admin.initializeApp({ projectId });
         } else {
-            throw new Error('Firebase 未設定：請設定 FIREBASE_SERVICE_ACCOUNT_PATH 或 GOOGLE_APPLICATION_CREDENTIALS，才可讀取 Firestore。');
+            return null;
         }
     }
 
@@ -290,6 +454,8 @@ async function getLineUserProfile(userId) {
     if (!userId) return null;
 
     const db = initFirebase();
+    if (!db) return null;
+
     const snapshot = await db.collection(LINE_USER_COLLECTION).doc(userId).get();
     return snapshot.exists ? snapshot.data() || {} : null;
 }
@@ -300,6 +466,8 @@ async function saveLineUserProfile(userId, data) {
     }
 
     const db = initFirebase();
+    if (!db) return;
+
     await db.collection(LINE_USER_COLLECTION).doc(userId).set({
         ...data,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -323,8 +491,12 @@ async function fetchClassData(classId) {
         return null;
     }
 
+    const db = initFirebase();
+    if (!db) {
+        return null;
+    }
+
     try {
-        const db = initFirebase();
         let merged = {};
 
         for (const id of candidateIds) {
@@ -358,6 +530,8 @@ async function fetchClassData(classId) {
 
 async function addDisciplineRecord(classId, studentNumber, type, note) {
     const db = initFirebase();
+    if (!db) return null;
+
     const id = normalizeClassId(classId || DEFAULT_CLASS_ID || '729');
     const stateRef = db.collection('classes').doc(id).collection('private').doc('state');
     const snapshot = await stateRef.get();
@@ -481,6 +655,15 @@ async function buildReply(message, fallbackClassId = DEFAULT_CLASS_ID, userId = 
             const classId = resolveClassId(text, fallbackClassId);
             const data = await fetchClassData(classId);
             if (!data || data.__firebaseError) {
+                if (item.type === 'history') {
+                    return buildReplyTextForData('history', {
+                        diaryEntries: [],
+                        scheduleEntries: [],
+                        seats: [],
+                        attendanceRecords: [],
+                        studentRecords: [],
+                    }, classId, studentNumber);
+                }
                 const reason = data && data.__errorMessage ? data.__errorMessage : 'Firebase 讀取失敗';
                 return reason;
             }
@@ -596,6 +779,7 @@ module.exports = {
     app,
     buildReply,
     buildReplyTextForData,
+    buildHistoryMarkdown,
     fetchClassData,
     addDisciplineRecord,
     resolveClassId,

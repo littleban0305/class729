@@ -141,8 +141,29 @@ class CloudSyncService {
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
     await _ensureWriteUser();
-    await _classes(db).doc(id).set({
+    final classRef = _classes(db).doc(id);
+    await classRef.set({
       'attendanceToday': _publicAttendanceToday(data['attendanceRecords']),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    final privateRef = classRef.collection('private').doc('state');
+    final existing = (await privateRef.get()).data() ?? <String, dynamic>{};
+    final mergedRecords = <String, Map<String, dynamic>>{};
+    for (final record in (existing['attendanceRecords'] as List? ?? [])) {
+      if (record is! Map) continue;
+      final value = Map<String, dynamic>.from(record);
+      final key = '${value['studentNumber'] ?? ''}|${value['date'] ?? ''}';
+      if (key != '|') mergedRecords[key] = value;
+    }
+    for (final record in (data['attendanceRecords'] as List? ?? [])) {
+      if (record is! Map) continue;
+      final value = Map<String, dynamic>.from(record);
+      final key = '${value['studentNumber'] ?? ''}|${value['date'] ?? ''}';
+      if (key != '|') mergedRecords[key] = value;
+    }
+    await privateRef.set({
+      'attendanceRecords': mergedRecords.values.toList(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }

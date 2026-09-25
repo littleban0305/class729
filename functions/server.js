@@ -211,6 +211,126 @@ function saveHistoryMarkdown(content, classId = DEFAULT_CLASS_ID) {
     return { fileName, fullPath, relativePath: path.relative(process.cwd(), fullPath) };
 }
 
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function formatInlineMarkdown(text) {
+    let html = escapeHtml(text);
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+    return html;
+}
+
+function markdownToHtml(markdown) {
+    const lines = (markdown || '').replace(/\r/g, '').split('\n');
+    const html = [];
+    let listItems = [];
+    let tableRows = [];
+    let paragraphBuffer = [];
+
+    const flushParagraph = () => {
+        if (!paragraphBuffer.length) return;
+        const text = paragraphBuffer.join(' ');
+        html.push(`<p>${formatInlineMarkdown(text)}</p>`);
+        paragraphBuffer = [];
+    };
+
+    const flushList = () => {
+        if (!listItems.length) return;
+        html.push(`<ul>${listItems.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join('')}</ul>`);
+        listItems = [];
+    };
+
+    const flushTable = () => {
+        if (!tableRows.length) return;
+        const rows = tableRows.map((row) => row.map((cell) => formatInlineMarkdown(cell)).join('</td><td>'));
+        const head = rows[0];
+        const body = rows.slice(1);
+        html.push('<table><thead><tr><th>' + head + '</th></tr></thead><tbody>' + body.map((row) => '<tr><td>' + row + '</td></tr>').join('') + '</tbody></table>');
+        tableRows = [];
+    };
+
+    const handleTableRow = (line) => {
+        const row = line.split('|').map((cell) => cell.trim()).filter((cell, index, arr) => cell || index === 0 || index === arr.length - 1);
+        if (row.length < 2) return;
+        tableRows.push(row.slice(1, -1));
+    };
+
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            flushParagraph();
+            flushList();
+            continue;
+        }
+
+        const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+            flushParagraph();
+            flushList();
+            flushTable();
+            const level = headingMatch[1].length;
+            html.push(`<h${level}>${formatInlineMarkdown(headingMatch[2])}</h${level}>`);
+            continue;
+        }
+
+        if (/^\|.*\|$/.test(trimmed)) {
+            flushParagraph();
+            flushList();
+            if (!tableRows.length) {
+                handleTableRow(trimmed);
+                continue;
+            }
+            if (/^\|?\s*[:-]{3,}\s*(\|\s*[:-]{3,}\s*)+\|?$/.test(trimmed)) {
+                continue;
+            }
+            handleTableRow(trimmed);
+            continue;
+        }
+
+        if (/^\-\s+/.test(trimmed)) {
+            flushParagraph();
+            if (tableRows.length) {
+                flushTable();
+            }
+            listItems.push(trimmed.replace(/^-\s+/, ''));
+            continue;
+        }
+
+        if (listItems.length) {
+            flushList();
+        }
+
+        if (/^>\s+/.test(trimmed)) {
+            flushParagraph();
+            html.push(`<blockquote>${formatInlineMarkdown(trimmed.replace(/^>\s+/, ''))}</blockquote>`);
+            continue;
+        }
+
+        if (tableRows.length) {
+            flushTable();
+        }
+
+        paragraphBuffer.push(trimmed);
+    }
+
+    flushParagraph();
+    flushList();
+    flushTable();
+
+    return html.join('\n');
+}
+
 function buildHistoryReplyPayload(data, classId = DEFAULT_CLASS_ID, studentNumber = '') {
     const markdown = buildHistoryMarkdown(data, classId, studentNumber);
     const saved = saveHistoryMarkdown(markdown, classId);
@@ -779,10 +899,98 @@ app.get('/history/:fileName', (req, res) => {
         return res.status(404).send('找不到歷史檔案');
     }
 
-    const content = fs.readFileSync(filePath, 'utf8');
-    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-    return res.send(content);
+    const markdown = fs.readFileSync(filePath, 'utf8');
+    const html = `<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(fileName)}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f9fc;
+        --panel: #ffffff;
+        --text: #1f2a37;
+        --muted: #58667a;
+        --border: #dfe6ee;
+        --accent: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+        line-height: 1.7;
+      }
+      .container {
+        max-width: 980px;
+        margin: 32px auto;
+        padding: 24px 20px 48px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+      }
+      h1, h2, h3, h4, h5, h6 {
+        color: var(--text);
+        margin-top: 1.5em;
+        margin-bottom: 0.7em;
+      }
+      h1 { font-size: 2rem; }
+      h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+      p, li, blockquote, code {
+        font-size: 1rem;
+      }
+      ul, ol {
+        padding-left: 1.5rem;
+      }
+      blockquote {
+        margin: 1rem 0;
+        color: var(--muted);
+        padding-left: 1rem;
+        border-left: 4px solid var(--accent);
+        background: #f3f7ff;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      th, td {
+        border: 1px solid var(--border);
+        padding: 10px 12px;
+        vertical-align: top;
+        text-align: left;
+      }
+      th {
+        background: #f3f7ff;
+      }
+      a { color: var(--accent); }
+      code {
+        background: #f5f7fb;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-family: Consolas, "Courier New", monospace;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      ${markdownToHtml(markdown)}
+    </div>
+  </body>
+</html>`;
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
 });
 
 app.post('/webhook', async (req, res) => {

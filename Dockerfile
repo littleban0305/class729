@@ -3,6 +3,7 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLUTTER_VERSION=3.24.3
 ENV PATH="/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:${PATH}"
+ENV TAR_OPTIONS=--no-same-owner
 
 WORKDIR /opt
 RUN apt-get update && apt-get install -y --no-install-recommends \

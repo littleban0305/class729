@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show ImageFilter;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -22,6 +23,210 @@ import 'teacher_pages.dart';
 import 'services/auth_service.dart';
 
 bool get isDesktopPlatform => !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
+ButtonStyle _glassButtonStyle({
+  required bool isDark,
+  required Color shadowColor,
+  required Color foregroundColor,
+}) =>
+    ButtonStyle(
+      backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled) ? foregroundColor.withValues(alpha: 0.4) : foregroundColor,
+      ),
+      backgroundBuilder: (_, states, child) => ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: CustomPaint(
+            painter: _GlassButtonPainter(isDark: isDark, states: states),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: isDark
+                      ? [
+                          Colors.white.withValues(alpha: states.contains(WidgetState.hovered) ? 0.15 : 0.1),
+                          Colors.white.withValues(alpha: 0.035),
+                        ]
+                      : [
+                          Colors.white.withValues(alpha: states.contains(WidgetState.hovered) ? 0.84 : 0.68),
+                          const Color(0xFFE5E7EA).withValues(alpha: 0.38),
+                        ],
+                ),
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+      elevation: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) return 0;
+        if (states.contains(WidgetState.pressed)) return 1;
+        if (states.contains(WidgetState.hovered) || states.contains(WidgetState.focused)) return 5;
+        return 3;
+      }),
+      shadowColor: WidgetStatePropertyAll(shadowColor),
+      shape: const WidgetStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(14))),
+      ),
+      side: const WidgetStatePropertyAll(BorderSide(color: Colors.transparent, width: 0)),
+    );
+
+const _flatButtonStyle = ButtonStyle(
+  elevation: WidgetStatePropertyAll(0),
+  shadowColor: WidgetStatePropertyAll(Colors.transparent),
+);
+
+Color _surfaceShadowColor(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark ? const Color(0x66000000) : const Color(0x33000000);
+
+ThemeData _buildAppTheme(Brightness brightness) {
+  final isDark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: Colors.blueGrey,
+    brightness: brightness,
+  ).copyWith(
+    primary: isDark ? const Color(0xFFE2E4E7) : const Color(0xFF27292D),
+    onPrimary: isDark ? const Color(0xFF202124) : Colors.white,
+    secondary: isDark ? const Color(0xFFB8BBC0) : const Color(0xFF595C62),
+    onSecondary: isDark ? const Color(0xFF202124) : Colors.white,
+    tertiary: isDark ? const Color(0xFFD0D2D6) : const Color(0xFF3C3F44),
+    onTertiary: isDark ? const Color(0xFF202124) : Colors.white,
+    surface: isDark ? const Color(0xFF202124) : const Color(0xFFF9FAFB),
+    surfaceContainerLowest: isDark ? const Color(0xFF191A1C) : Colors.white,
+    surfaceContainerLow: isDark ? const Color(0xFF242629) : const Color(0xFFF4F5F6),
+    surfaceContainer: isDark ? const Color(0xFF292B2F) : const Color(0xFFEFF0F2),
+    surfaceContainerHigh: isDark ? const Color(0xFF303237) : const Color(0xFFE8E9EB),
+    surfaceContainerHighest: isDark ? const Color(0xFF383A40) : const Color(0xFFE0E2E5),
+    primaryContainer: isDark ? const Color(0xFF3B3D42) : const Color(0xFFE4E6E9),
+    onPrimaryContainer: isDark ? const Color(0xFFF0F1F3) : const Color(0xFF24262A),
+    secondaryContainer: isDark ? const Color(0xFF34363A) : const Color(0xFFEAEBED),
+    onSecondaryContainer: isDark ? const Color(0xFFE4E5E7) : const Color(0xFF2B2D31),
+    tertiaryContainer: isDark ? const Color(0xFF3A3C41) : const Color(0xFFE5E6E8),
+    onTertiaryContainer: isDark ? const Color(0xFFE8E9EB) : const Color(0xFF2E3034),
+  );
+  final shadowColor = isDark ? const Color(0x99000000) : const Color(0x40000000);
+
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    fontFamily: 'Class729Rounded',
+    colorScheme: scheme,
+    appBarTheme: AppBarTheme(
+      backgroundColor: (isDark ? const Color(0xFF202124) : Colors.white).withValues(alpha: 0.76),
+      foregroundColor: scheme.onSurface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    textTheme: TextTheme(
+      bodyLarge: TextStyle(color: isDark ? const Color(0xFFF1F3F8) : const Color(0xFF171A24)),
+      bodyMedium: TextStyle(color: isDark ? const Color(0xFFD9DDE7) : const Color(0xFF30323A)),
+    ),
+    scaffoldBackgroundColor: Colors.transparent,
+    cardTheme: CardThemeData(
+      color: (isDark ? const Color(0xFF303237) : Colors.white).withValues(alpha: 0.78),
+      surfaceTintColor: Colors.transparent,
+      elevation: 6,
+      shadowColor: shadowColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.42)),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: scheme.surfaceContainerLow,
+      selectedColor: scheme.primaryContainer,
+      elevation: 2,
+      pressElevation: 4,
+      shadowColor: shadowColor,
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: _glassButtonStyle(
+        isDark: isDark,
+        shadowColor: shadowColor,
+        foregroundColor: scheme.onSurface,
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: _glassButtonStyle(
+        isDark: isDark,
+        shadowColor: shadowColor,
+        foregroundColor: scheme.onSurface,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: _glassButtonStyle(
+        isDark: isDark,
+        shadowColor: shadowColor,
+        foregroundColor: scheme.onSurface,
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: _glassButtonStyle(
+        isDark: isDark,
+        shadowColor: shadowColor,
+        foregroundColor: scheme.onSurface,
+      ),
+    ),
+    textButtonTheme: const TextButtonThemeData(
+      style: _flatButtonStyle,
+    ),
+    iconButtonTheme: const IconButtonThemeData(
+      style: _flatButtonStyle,
+    ),
+  );
+}
+
+class _GlassButtonPainter extends CustomPainter {
+  final bool isDark;
+  final Set<WidgetState> states;
+
+  const _GlassButtonPainter({required this.isDark, required this.states});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final hovered = states.contains(WidgetState.hovered) || states.contains(WidgetState.focused);
+    final disabled = states.contains(WidgetState.disabled);
+    final rect = Offset.zero & size;
+    final borderPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.bottomLeft,
+        end: Alignment.topRight,
+        colors: isDark
+            ? [
+                Colors.black.withValues(alpha: disabled ? 0.1 : 0.38),
+                Colors.white.withValues(
+                    alpha: disabled
+                        ? 0.24
+                        : hovered
+                            ? 0.92
+                            : 0.72),
+              ]
+            : [
+                Colors.black.withValues(alpha: disabled ? 0.06 : 0.22),
+                Colors.white.withValues(
+                    alpha: disabled
+                        ? 0.42
+                        : hovered
+                            ? 1
+                            : 0.9),
+              ],
+      ).createShader(rect)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = hovered ? 1.5 : 1.2;
+    final borderRect = rect.deflate(0.7);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(borderRect, Radius.circular(min(14, size.shortestSide / 2))),
+      borderPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _GlassButtonPainter oldDelegate) =>
+      oldDelegate.isDark != isDark || oldDelegate.states != states;
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -110,30 +315,18 @@ class _SevenTwentyNineAppState extends State<SevenTwentyNineApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: '729',
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: 'Class729Rounded',
-        colorSchemeSeed: Colors.indigo,
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(color: Color(0xFF171A24)),
-          bodyMedium: TextStyle(color: Color(0xFF30323A)),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF5F6FA),
-        cardTheme: const CardThemeData(elevation: 0),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        fontFamily: 'Class729Rounded',
-        colorSchemeSeed: Colors.indigo,
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(color: Color(0xFFF1F3F8)),
-          bodyMedium: TextStyle(color: Color(0xFFD9DDE7)),
-        ),
-        scaffoldBackgroundColor: const Color(0xFF101217),
-        cardTheme: const CardThemeData(elevation: 0),
-      ),
+      theme: _buildAppTheme(Brightness.light),
+      darkTheme: _buildAppTheme(Brightness.dark),
       themeMode: themeMode,
+      builder: (_, child) => Stack(
+        fit: StackFit.expand,
+        children: [
+          _AppBackdrop(
+            brightness: themeMode == ThemeMode.dark ? Brightness.dark : Brightness.light,
+          ),
+          if (child != null) child,
+        ],
+      ),
       home: AnimatedBuilder(
         animation: widget.state,
         builder: (context, _) => Stack(
@@ -148,6 +341,32 @@ class _SevenTwentyNineAppState extends State<SevenTwentyNineApp> {
               child: AppWindowControls(),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AppBackdrop extends StatelessWidget {
+  final Brightness brightness;
+
+  const _AppBackdrop({required this.brightness});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = brightness == Brightness.dark;
+
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: const Alignment(-0.35, -0.7),
+            radius: 1.35,
+            colors: isDark
+                ? const [Color(0xFF303236), Color(0xFF222326), Color(0xFF17181A)]
+                : const [Color(0xFFFFFFFF), Color(0xFFF1F2F4), Color(0xFFE2E4E7)],
+            stops: const [0, 0.58, 1],
+          ),
         ),
       ),
     );
@@ -356,44 +575,54 @@ class WindowBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return GestureDetector(
       onPanStart: isDesktopPlatform ? (_) => windowManager.startDragging() : null,
-      child: Container(
-        height: mobile ? 64 : 56,
-        padding: EdgeInsets.only(
-          left: 18,
-          right: isDesktopPlatform ? 120 : 72,
-          top: mobile ? 8 : 0,
-        ),
-        decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface),
-        child: Row(
-          children: [
-            if (mobile) ...[
-              IconButton(
-                tooltip: '開啟選單',
-                onPressed: onOpenMenu,
-                icon: const Icon(Icons.menu),
-              ),
-              const SizedBox(width: 2),
-            ],
-            const Text(
-              '729',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            height: mobile ? 64 : 56,
+            padding: EdgeInsets.only(
+              left: 18,
+              right: isDesktopPlatform ? 120 : 72,
+              top: mobile ? 8 : 0,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
+            decoration: BoxDecoration(
+              color: (isDark ? const Color(0xFF202124) : Colors.white).withValues(alpha: 0.58),
+              border: Border(bottom: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.42))),
+            ),
+            child: Row(
+              children: [
+                if (mobile) ...[
+                  IconButton(
+                    tooltip: '開啟選單',
+                    onPressed: onOpenMenu,
+                    icon: const Icon(Icons.menu),
+                  ),
+                  const SizedBox(width: 2),
+                ],
+                const Text(
+                  '729',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
                 ),
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (actions != null) ...actions!,
+              ],
             ),
-            if (actions != null) ...actions!,
-          ],
+          ),
         ),
       ),
     );
@@ -520,96 +749,120 @@ class SideBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxHeight = MediaQuery.sizeOf(context).height - 36;
+    final borderRadius = BorderRadius.circular(expanded ? 18 : 30);
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Positioned(
       left: 18,
       bottom: 18,
-      child: Material(
-        color: const Color(0xFF171A24),
-        elevation: 12,
-        shadowColor: Colors.black45,
-        borderRadius: BorderRadius.circular(expanded ? 18 : 30),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          width: expanded ? 210 : 58,
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: expanded
-              ? SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(18, 8, 18, 12),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '729',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ),
-                      for (int i = 0; i < icons.length; i++) _navItem(i),
-                      if (onExit != null)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          child: Material(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(12),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: onExit,
-                              child: const SizedBox(
-                                height: 48,
-                                child: Row(
-                                  children: [
-                                    SizedBox(width: 14),
-                                    Icon(Icons.logout_outlined, color: Colors.white70),
-                                    SizedBox(width: 12),
-                                    Text(
-                                      '退出',
-                                      style: TextStyle(color: Colors.white, fontSize: 16),
-                                    ),
-                                  ],
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Material(
+            color: (isDark ? const Color(0xFF27292D) : Colors.white).withValues(alpha: 0.58),
+            elevation: 9,
+            shadowColor: Colors.black.withValues(alpha: isDark ? 0.44 : 0.2),
+            borderRadius: borderRadius,
+            clipBehavior: Clip.antiAlias,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: expanded ? 210 : 58,
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: borderRadius,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: isDark ? 0.06 : 0.48),
+                    Colors.black.withValues(alpha: isDark ? 0.08 : 0.035),
+                  ],
+                ),
+                border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+              ),
+              child: expanded
+                  ? SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '729',
+                                style: TextStyle(
+                                  color: scheme.onSurface,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      IconButton(
-                        tooltip: '收合導覽列',
-                        onPressed: onToggle,
-                        icon: const Icon(
-                          Icons.chevron_left,
-                          color: Colors.white70,
-                        ),
+                          for (int i = 0; i < icons.length; i++) _navItem(context, i),
+                          if (onExit != null)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              child: Material(
+                                color: Colors.transparent,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: onExit,
+                                  child: SizedBox(
+                                    height: 48,
+                                    child: Row(
+                                      children: [
+                                        const SizedBox(width: 14),
+                                        Icon(Icons.logout_outlined, color: scheme.onSurfaceVariant),
+                                        const SizedBox(width: 12),
+                                        Text(
+                                          '退出',
+                                          style: TextStyle(color: scheme.onSurface, fontSize: 16),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          IconButton(
+                            tooltip: '收合導覽列',
+                            onPressed: onToggle,
+                            icon: const Icon(
+                              Icons.chevron_left,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: '展開導覽列',
-                      onPressed: onToggle,
-                      icon: const Icon(Icons.menu, color: Colors.white, size: 25),
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: '展開導覽列',
+                          onPressed: onToggle,
+                          icon: const Icon(Icons.menu, size: 25),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _navItem(int index) {
+  Widget _navItem(BuildContext context, int index) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       child: Material(
-        color: current == index ? const Color(0xFF30364A) : Colors.transparent,
+        color: current == index
+            ? scheme.onSurface.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.16 : 0.08)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -619,14 +872,14 @@ class SideBar extends StatelessWidget {
             child: Row(
               children: [
                 const SizedBox(width: 14),
-                Icon(icons[index], color: Colors.white70),
+                Icon(icons[index], color: scheme.onSurfaceVariant),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     labels[index],
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                    style: TextStyle(color: scheme.onSurface, fontSize: 16),
                   ),
                 ),
               ],
@@ -675,6 +928,15 @@ class _ReminderCanvas extends StatelessWidget {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: immersive ? BorderRadius.zero : BorderRadius.circular(18),
         border: immersive ? null : Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        boxShadow: immersive
+            ? null
+            : [
+                BoxShadow(
+                  color: _surfaceShadowColor(context),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
       ),
       child: Stack(
         clipBehavior: Clip.none,
@@ -2313,6 +2575,13 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: _surfaceShadowColor(context),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -2339,8 +2608,8 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
                       child: Container(
                         width: guides.isCenterX ? 2.5 : (guides.isMarginX ? 2.0 : 1.5),
                         color: guides.isCenterX
-                            ? const Color(0xFFFF007A)
-                            : (guides.isMarginX ? const Color(0xFF00E5FF) : const Color(0xFF8B5CF6)),
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.outline,
                       ),
                     ),
                   if (guides.y != null)
@@ -2351,8 +2620,8 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
                       child: Container(
                         height: guides.isCenterY ? 2.5 : (guides.isMarginY ? 2.0 : 1.5),
                         color: guides.isCenterY
-                            ? const Color(0xFFFF007A)
-                            : (guides.isMarginY ? const Color(0xFF00E5FF) : const Color(0xFF8B5CF6)),
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.outline,
                       ),
                     ),
                 ],
@@ -2404,7 +2673,7 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
                     decoration: BoxDecoration(
                       color: Color(element.backgroundColor),
                       border: selected
-                          ? Border.all(color: const Color(0xFF8B5CF6), width: 2)
+                          ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
                           : Border.all(color: Colors.transparent, width: 2),
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -2426,17 +2695,17 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
                           width: 28,
                           height: 28,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF8B5CF6),
+                            color: Theme.of(context).colorScheme.primary,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2),
                             boxShadow: const [
                               BoxShadow(color: Colors.black26, blurRadius: 4),
                             ],
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.open_in_full,
                             size: 14,
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.onPrimary,
                           ),
                         ),
                       ),
@@ -2451,17 +2720,17 @@ class _FastReminderCanvasState extends State<_FastReminderCanvas> {
                           width: 24,
                           height: 24,
                           decoration: BoxDecoration(
-                            color: Colors.redAccent,
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(color: Theme.of(context).colorScheme.surface, width: 2),
                             boxShadow: const [
                               BoxShadow(color: Colors.black26, blurRadius: 4),
                             ],
                           ),
-                          child: const Icon(
+                          child: Icon(
                             Icons.close,
                             size: 14,
-                            color: Colors.white,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ),
@@ -3565,14 +3834,23 @@ class _SeatRows extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 16),
             padding: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFF30364A),
+              gradient: LinearGradient(
+                colors: [
+                  Theme.of(context).colorScheme.surfaceContainerLow,
+                  Theme.of(context).colorScheme.surface,
+                  Theme.of(context).colorScheme.surfaceContainerHigh,
+                ],
+              ),
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.45),
+              ),
             ),
-            child: const Center(
+            child: Center(
               child: Text(
                 '講台',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.onSurface,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
                 ),
@@ -3725,6 +4003,8 @@ class _SeatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final seat = state.seats[index];
+    final scheme = Theme.of(context).colorScheme;
+    final baseColor = _seatColor(context, seat.gender);
     Widget buildCard() {
       return Material(
         color: Colors.transparent,
@@ -3739,8 +4019,8 @@ class _SeatCard extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  _seatColor(context, seat.gender).withValues(alpha: 0.96),
-                  _seatColor(context, seat.gender).withValues(alpha: 0.84),
+                  Color.lerp(baseColor, scheme.surface, 0.18)!,
+                  baseColor,
                 ],
               ),
               borderRadius: BorderRadius.circular(20),
@@ -3750,9 +4030,9 @@ class _SeatCard extends StatelessWidget {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 10,
-                  offset: const Offset(0, 6),
+                  color: _surfaceShadowColor(context),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -3804,13 +4084,14 @@ class _SeatCard extends StatelessWidget {
   }
 
   Color _seatColor(BuildContext context, String gender) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (gender == '男') {
-      return Theme.of(context).brightness == Brightness.dark ? const Color(0xFF164A78) : const Color(0xFFDCEEFF);
+      return isDark ? const Color(0xFF3A3C41) : const Color(0xFFD7D9DC);
     }
     if (gender == '女') {
-      return Theme.of(context).brightness == Brightness.dark ? const Color(0xFF7D294B) : const Color(0xFFFFE0EA);
+      return isDark ? const Color(0xFF303236) : const Color(0xFFE9EAEC);
     }
-    return Theme.of(context).colorScheme.surfaceContainerHighest;
+    return isDark ? const Color(0xFF35373C) : const Color(0xFFE1E3E6);
   }
 }
 

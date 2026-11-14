@@ -11,7 +11,9 @@ import 'auth_service.dart';
 ///
 /// 這樣可以避免把秩序不佳、缺交作業、整潔評分、照片與完整簽到時間直接公開給大屏。
 class CloudSyncService {
-  FirebaseFirestore? get _db => kFirebaseConfigured && firebaseRuntimeReady ? FirebaseFirestore.instance : null;
+  FirebaseFirestore? get _db => kFirebaseConfigured && firebaseRuntimeReady
+      ? FirebaseFirestore.instance
+      : null;
 
   bool get isConfigured => kFirebaseConfigured;
 
@@ -20,20 +22,15 @@ class CloudSyncService {
     required Map<String, dynamic> incoming,
   }) {
     final merged = Map<String, dynamic>.from(existing);
+    merged.remove('teacherPassword');
     for (final entry in incoming.entries) {
-      if (entry.key == 'teacherPassword') {
-        final value = entry.value;
-        if (value != null && value.toString().trim().isNotEmpty) {
-          merged['teacherPassword'] = value;
-        }
-        continue;
-      }
       merged[entry.key] = entry.value;
     }
     return merged;
   }
 
-  CollectionReference<Map<String, dynamic>> _classes(FirebaseFirestore db) => db.collection('classes');
+  CollectionReference<Map<String, dynamic>> _classes(FirebaseFirestore db) =>
+      db.collection('classes');
 
   Future<User> _ensureAuthenticatedUser() async {
     if (!kFirebaseConfigured || !firebaseRuntimeReady) {
@@ -60,8 +57,21 @@ class CloudSyncService {
       'seats': data['seats'] ?? <dynamic>[],
       'diaryEntries': data['diaryEntries'] ?? <dynamic>[],
       'scheduleEntries': data['scheduleEntries'] ?? <dynamic>[],
+      'timePeriods': data['timePeriods'] ?? <dynamic>[],
+      'teacherNotice': data['teacherNotice'],
+      'punishments': data['punishments'] ?? <dynamic>[],
+      if (data['materialFolders'] is List) 'materialFolders': data['materialFolders'],
+      if (data['materialOpenDelay'] is num) 'materialOpenDelay': data['materialOpenDelay'],
+      if (data['chromeProfiles'] is List) 'chromeProfiles': data['chromeProfiles'],
+      if (data['policyText'] is String) 'policyText': data['policyText'],
+      'rewards': data['rewards'] ?? <dynamic>[],
       'lateThreshold': data['lateThreshold'] ?? '07:30',
       'testNow': data['testNow'],
+      if (data['bigScreenExitPinVerifier'] is String &&
+          (data['bigScreenExitPinVerifier'] as String).isNotEmpty)
+        'bigScreenExitPinVerifier': data['bigScreenExitPinVerifier'],
+      if (data['officerPinVerifier'] is String && (data['officerPinVerifier'] as String).isNotEmpty)
+        'officerPinVerifier': data['officerPinVerifier'],
       // 教師端/後台需要知道精確簽到時間；公開資料仍保留今日簽到狀態，並維持實際打卡時間。
       'attendanceToday': _publicAttendanceToday(data['attendanceRecords']),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -88,7 +98,8 @@ class CloudSyncService {
         .toList();
   }
 
-  Future<void> pushPublicState(String classId, Map<String, dynamic> data) async {
+  Future<void> pushPublicState(
+      String classId, Map<String, dynamic> data) async {
     final db = _db;
     final id = classId.trim();
     if (db == null) throw StateError('Firebase 尚未初始化');
@@ -102,7 +113,8 @@ class CloudSyncService {
     return trimmed;
   }
 
-  Future<void> pushPublicDiary(String classId, Map<String, dynamic> data) async {
+  Future<void> pushPublicDiary(
+      String classId, Map<String, dynamic> data) async {
     final db = _db;
     final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
@@ -124,7 +136,10 @@ class CloudSyncService {
     // 公開資料使用 merge，避免大屏簽到更新把其他欄位覆蓋掉。
     await _classes(db).doc(id).set(_publicData(data), SetOptions(merge: true));
     final privateData = Map<String, dynamic>.from(data)..remove('testNow');
-    final existingPrivate = (await _classes(db).doc(id).collection('private').doc('state').get()).data() ?? {};
+    final existingPrivate =
+        (await _classes(db).doc(id).collection('private').doc('state').get())
+                .data() ??
+            {};
     final mergedPrivate = mergePrivateState(
       existing: existingPrivate,
       incoming: {
@@ -132,10 +147,15 @@ class CloudSyncService {
         'updatedAt': FieldValue.serverTimestamp(),
       },
     );
-    await _classes(db).doc(id).collection('private').doc('state').set(mergedPrivate, SetOptions(merge: true));
+    await _classes(db)
+        .doc(id)
+        .collection('private')
+        .doc('state')
+        .set(mergedPrivate, SetOptions(merge: true));
   }
 
-  Future<void> pushAttendanceToday(String classId, Map<String, dynamic> data) async {
+  Future<void> pushAttendanceToday(
+      String classId, Map<String, dynamic> data) async {
     final db = _db;
     final id = _normalizeClassId(classId);
     if (db == null) throw StateError('Firebase 尚未初始化');
@@ -175,7 +195,8 @@ class CloudSyncService {
     if (id.isEmpty) throw StateError('請先設定班級代碼');
 
     await _ensureAuthenticatedUser();
-    final privateSnapshot = await _classes(db).doc(id).collection('private').doc('state').get();
+    final privateSnapshot =
+        await _classes(db).doc(id).collection('private').doc('state').get();
     if (privateSnapshot.exists) return privateSnapshot.data();
 
     // 相容舊版：如果以前只有 classes/{classId}，仍可讀取舊的整包資料。
@@ -197,7 +218,8 @@ class CloudSyncService {
     });
   }
 
-  Stream<Map<String, dynamic>?> watchState(String classId) => watchPrivateState(classId);
+  Stream<Map<String, dynamic>?> watchState(String classId) =>
+      watchPrivateState(classId);
 
   /// BigScreen 專用的公開即時資料監聽。
   Stream<Map<String, dynamic>?> watchPublicState(String classId) {
@@ -206,20 +228,26 @@ class CloudSyncService {
     if (db == null || id.isEmpty) return const Stream.empty();
 
     return Stream.fromFuture(_ensureAuthenticatedUser()).asyncExpand((_) {
-      return _classes(db).doc(id).snapshots(includeMetadataChanges: true).map((doc) => doc.data()).handleError((error) {
+      return _classes(db)
+          .doc(id)
+          .snapshots(includeMetadataChanges: true)
+          .map((doc) => doc.data())
+          .handleError((error) {
         debugPrint('[CloudSyncService] watchPublicState error: $error');
         return null;
       });
     });
   }
 
-  Future<void> pushRegistration(String classId, Map<String, dynamic> data) async {
+  Future<void> pushRegistration(
+      String classId, Map<String, dynamic> data) async {
     final db = _db;
     final id = classId.trim();
     if (db == null) throw StateError('Firebase 尚未初始化');
     if (id.isEmpty) throw StateError('請先設定班級代碼');
     await _ensureWriteUser();
-    final submissionId = data['id'] as String? ?? DateTime.now().microsecondsSinceEpoch.toString();
+    final submissionId = data['id'] as String? ??
+        DateTime.now().microsecondsSinceEpoch.toString();
     await _classes(db).doc(id).collection('submissions').doc(submissionId).set({
       ...data,
       'source': 'bigscreen',
@@ -227,12 +255,17 @@ class CloudSyncService {
     });
   }
 
-  Future<void> updateRegistration(String classId, String id, Map<String, dynamic> data) async {
+  Future<void> updateRegistration(
+      String classId, String id, Map<String, dynamic> data) async {
     final db = _db;
     final classKey = classId.trim();
     if (db == null || classKey.isEmpty || id.isEmpty) return;
     await _ensureWriteUser();
-    await _classes(db).doc(classKey).collection('submissions').doc(id).set(data, SetOptions(merge: true));
+    await _classes(db)
+        .doc(classKey)
+        .collection('submissions')
+        .doc(id)
+        .set(data, SetOptions(merge: true));
   }
 
   Future<void> deleteRegistration(String classId, String id) async {
@@ -241,6 +274,116 @@ class CloudSyncService {
     if (db == null || classKey.isEmpty || id.isEmpty) return;
     await _ensureWriteUser();
     await _classes(db).doc(classKey).collection('submissions').doc(id).delete();
+  }
+
+  // ── 通知：classes/{classId}/events（target = 'teacher' 或 'bigscreen'）──
+
+  Future<void> pushEvent(String classId, {required String target, required String title, String body = ''}) async {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return;
+    await _ensureWriteUser();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await _classes(db).doc(id).collection('events').doc('${now}_$target').set({
+      'target': target,
+      'title': title,
+      'body': body,
+      'at': now,
+    });
+  }
+
+  Stream<List<Map<String, dynamic>>> watchEvents(String classId, String target) {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return const Stream.empty();
+    return Stream.fromFuture(_ensureAuthenticatedUser()).asyncExpand((_) {
+      return _classes(db)
+          .doc(id)
+          .collection('events')
+          .orderBy('at')
+          .limitToLast(200)
+          .snapshots()
+          .map((s) => s.docs.map((d) => d.data()).where((e) => e['target'] == target).toList().reversed.toList());
+    });
+  }
+
+  // ── 教師評分：classes/{classId}/ratings ──
+
+  Future<void> pushRating(String classId, Map<String, dynamic> rating) async {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return;
+    await _ensureWriteUser();
+    await _classes(db).doc(id).collection('ratings').doc(rating['id'] as String).set(rating);
+  }
+
+  Stream<List<Map<String, dynamic>>> watchRatings(String classId) {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return const Stream.empty();
+    return Stream.fromFuture(_ensureAuthenticatedUser()).asyncExpand((_) {
+      return _classes(db)
+          .doc(id)
+          .collection('ratings')
+          .orderBy('at', descending: true)
+          .limit(500)
+          .snapshots()
+          .map((s) => s.docs.map((d) => d.data()).toList());
+    });
+  }
+
+  Future<void> deleteRating(String classId, String ratingId) async {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return;
+    await _ensureWriteUser();
+    await _classes(db).doc(id).collection('ratings').doc(ratingId).delete();
+  }
+
+  // ── 詢問（大屏 ↔ 教師聊天）：classes/{classId}/chat ──
+
+  Future<void> pushChatMessage(String classId, {required String from, required String text}) async {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null) throw StateError('Firebase 尚未初始化');
+    if (id.isEmpty) throw StateError('請先設定班級代碼');
+    await _ensureWriteUser();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final msgId = '${now}_$from';
+    await _classes(db).doc(id).collection('chat').doc(msgId).set({
+      'id': msgId,
+      'from': from,
+      'text': text,
+      'at': now,
+    });
+  }
+
+  Stream<List<Map<String, dynamic>>> watchChat(String classId) {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return const Stream.empty();
+    return Stream.fromFuture(_ensureAuthenticatedUser()).asyncExpand((_) {
+      return _classes(db)
+          .doc(id)
+          .collection('chat')
+          .orderBy('at')
+          .limitToLast(300)
+          .snapshots()
+          .map((snapshot) => snapshot.docs.map((doc) => doc.data()).toList());
+    });
+  }
+
+  Future<void> clearChat(String classId) async {
+    final db = _db;
+    final id = classId.trim();
+    if (db == null || id.isEmpty) return;
+    await _ensureWriteUser();
+    final docs = await _classes(db).doc(id).collection('chat').get();
+    final batch = db.batch();
+    for (final d in docs.docs) {
+      batch.delete(d.reference);
+    }
+    await batch.commit();
   }
 
   Stream<List<Map<String, dynamic>>> watchRegistrations(String classId) {

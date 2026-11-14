@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
@@ -13,6 +15,18 @@ class AppState extends ChangeNotifier {
   static const _remindersKey = 'reminders';
   static const _seatsKey = 'seats';
   static const _diaryKey = 'diary';
+  static const _timePeriodsKey = 'timePeriods';
+  static const _teacherNoticeKey = 'teacherNotice';
+  static const _punishmentsKey = 'punishments';
+  static const _materialFoldersKey = 'materialFolders';
+  static const _chromeProfilesKey = 'chromeProfiles';
+  static const _policyTextKey = 'policyText';
+  static const _materialOpenDelayKey = 'materialOpenDelay';
+  static const _rewardsKey = 'rewards';
+  static const _lessonRatingsKey = 'lessonRatings';
+  static const _dismissedNoticeKey = 'dismissedNoticeId';
+  static const _notifSeenKey = 'notifSeenAt';
+  static const _diaryTextScaleKey = 'diaryTextScale';
   static const _scheduleKey = 'schedule';
   static const _darkModeKey = 'darkMode';
   static const _testNowKey = 'testNow';
@@ -24,11 +38,16 @@ class AppState extends ChangeNotifier {
   static const _weeklySelectionsKey = 'weeklySelections';
   static const _classIdKey = 'classId';
   static const _deviceRoleKey = 'deviceRole';
+  static const _bigScreenExitPinVerifierKey = 'bigScreenExitPinVerifier';
+  static const _officerPinVerifierKey = 'officerPinVerifier';
 
   final CloudSyncService cloud = CloudSyncService();
   String classId = '';
   bool cloudSyncEnabled = false;
   String deviceRole = '';
+  String bigScreenExitPinVerifier = '';
+  /// 管理者 PIN 碼（進入大屏蓋章頁要輸入）
+  String officerPinVerifier = '';
   StreamSubscription<Map<String, dynamic>?>? _publicCloudSubscription;
   StreamSubscription<Map<String, dynamic>?>? _teacherCloudSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _registrationSubscription;
@@ -49,12 +68,106 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  int? get officerPinLength {
+    final parts = officerPinVerifier.split(':');
+    return parts.length == 3 ? int.tryParse(parts[0]) : null;
+  }
+
+  Future<void> setOfficerPin(String pin) async {
+    if (!RegExp(r'^\d{4,8}$').hasMatch(pin)) {
+      throw const FormatException('PIN 碼必須是 4 至 8 位數字');
+    }
+    final salt = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]).toString();
+    officerPinVerifier = '${pin.length}:${base64UrlEncode(salt)}:$digest';
+    await _save();
+    notifyListeners();
+  }
+
+  bool verifyOfficerPin(String pin) => _verifyPin(officerPinVerifier, pin);
+
+  bool _verifyPin(String verifier, String pin) {
+    final parts = verifier.split(':');
+    if (parts.length != 3 || int.tryParse(parts[0]) != pin.length) return false;
+    try {
+      final salt = base64Url.decode(parts[1]);
+      final expected = parts[2];
+      final actual = sha256.convert([...salt, ...utf8.encode(pin)]).toString();
+      if (actual.length != expected.length) return false;
+      var difference = 0;
+      for (var i = 0; i < actual.length; i++) {
+        difference |= actual.codeUnitAt(i) ^ expected.codeUnitAt(i);
+      }
+      return difference == 0;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  int? get bigScreenExitPinLength {
+    final parts = bigScreenExitPinVerifier.split(':');
+    return parts.length == 3 ? int.tryParse(parts[0]) : null;
+  }
+
+  Future<void> setBigScreenExitPin(String pin) async {
+    if (!RegExp(r'^\d{4,8}$').hasMatch(pin)) {
+      throw const FormatException('PIN 碼必須是 4 至 8 位數字');
+    }
+    final salt = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+    final saltText = base64UrlEncode(salt);
+    final digest = sha256.convert([...salt, ...utf8.encode(pin)]).toString();
+    bigScreenExitPinVerifier = '${pin.length}:$saltText:$digest';
+    await _save();
+    notifyListeners();
+  }
+
+  bool verifyBigScreenExitPin(String pin) {
+    final parts = bigScreenExitPinVerifier.split(':');
+    if (parts.length != 3 || int.tryParse(parts[0]) != pin.length) return false;
+    try {
+      final salt = base64Url.decode(parts[1]);
+      final expected = parts[2];
+      final actual = sha256.convert([...salt, ...utf8.encode(pin)]).toString();
+      if (actual.length != expected.length) return false;
+      var difference = 0;
+      for (var i = 0; i < actual.length; i++) {
+        difference |= actual.codeUnitAt(i) ^ expected.codeUnitAt(i);
+      }
+      return difference == 0;
+    } on FormatException {
+      return false;
+    }
+  }
+
   List<ReminderData> reminders = [];
   List<SeatData> seats = [];
   List<String> diary = [];
   List<String> schedule = [];
   List<ScheduleEntry> scheduleEntries = [];
   List<DiaryEntry> diaryEntries = [];
+  List<TimePeriod> timePeriods = [];
+  /// 教師即時通知（null = 目前沒有通知）
+  TeacherNotice? teacherNotice;
+  /// 懲罰抽籤的籤（教師後台管理）
+  List<String> punishments = [];
+  /// 教材資料夾（下課後自動打開下一節的教材）
+  List<MaterialFolder> materialFolders = MaterialFolder.defaults();
+  /// 下課後幾分鐘自動打開下一節的教材
+  int materialOpenDelay = 5;
+  /// Chrome 使用者清單（教師後台設定）
+  List<ChromeProfile> chromeProfiles = [];
+  /// 蓋章政策全文（空白 = 用內建的修正版）。格式：第一行標題；「一、」開頭是段落標題；其他每行一條
+  String policyText = '';
+  /// 兌換獎勵的項目（教師後台管理）
+  List<RewardItem> rewards = [];
+  /// 教師評分紀錄（每節課 1～5 顆星）：{id, date, lesson, subject, stars, at}
+  List<Map<String, dynamic>> lessonRatings = [];
+  /// 這台大屏已經關掉的通知 id（只存在本機，不同步）
+  String dismissedNoticeId = '';
+  /// 這台裝置最後一次看通知的時間（只存在本機）
+  int notifSeenAt = 0;
+  /// 聯絡簿文字大小（1.0 = 一頁 6 行；越大字越大、一頁行數越少）。只存在這台裝置
+  double diaryTextScale = 1.0;
   bool darkMode = false;
   DateTime? testNow;
   List<AttendanceRecord> attendanceRecords = [];
@@ -67,10 +180,64 @@ class AppState extends ChangeNotifier {
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('teacherPassword');
+    await prefs.remove('teacherSignedIn');
     cloudSyncEnabled = kFirebaseConfigured && firebaseRuntimeReady;
     final reminderRaw = prefs.getString(_remindersKey);
     final seatRaw = prefs.getString(_seatsKey);
     final diaryRaw = prefs.getString(_diaryKey);
+    final noticeRaw = prefs.getString(_teacherNoticeKey);
+    if (noticeRaw != null) {
+      try {
+        teacherNotice = TeacherNotice.tryParse(jsonDecode(noticeRaw));
+      } catch (_) {}
+    }
+    dismissedNoticeId = prefs.getString(_dismissedNoticeKey) ?? '';
+    notifSeenAt = prefs.getInt(_notifSeenKey) ?? 0;
+    diaryTextScale = prefs.getDouble(_diaryTextScaleKey) ?? 1.0;
+    try {
+      final mf = prefs.getString(_materialFoldersKey);
+      if (mf != null) {
+        materialFolders = (jsonDecode(mf) as List)
+            .whereType<Map>()
+            .map((e) => MaterialFolder.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+      materialOpenDelay = prefs.getInt(_materialOpenDelayKey) ?? 5;
+      policyText = prefs.getString(_policyTextKey) ?? '';
+      final cp = prefs.getString(_chromeProfilesKey);
+      if (cp != null) {
+        chromeProfiles = (jsonDecode(cp) as List)
+            .whereType<Map>()
+            .map((e) => ChromeProfile.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+      _addMaterialKeyword('英語', '世界節慶萬花筒');
+      _addMaterialKeyword('地理', '全球與鄉土');
+      _addMaterialKeyword('美術', '視覺藝術');
+      final p = prefs.getString(_punishmentsKey);
+      if (p != null) punishments = (jsonDecode(p) as List).map((e) => e.toString()).toList();
+      final lr = prefs.getString(_lessonRatingsKey);
+      if (lr != null) {
+        lessonRatings = (jsonDecode(lr) as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+      final r = prefs.getString(_rewardsKey);
+      if (r != null) {
+        rewards = (jsonDecode(r) as List)
+            .whereType<Map>()
+            .map((e) => RewardItem.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      }
+    } catch (_) {}
+    final timePeriodsRaw = prefs.getString(_timePeriodsKey);
+    if (timePeriodsRaw != null) {
+      try {
+        timePeriods = (jsonDecode(timePeriodsRaw) as List)
+            .whereType<Map>()
+            .map((e) => TimePeriod.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
+      } catch (_) {}
+    }
     final scheduleRaw = prefs.getString(_scheduleKey);
     final attendanceRaw = prefs.getString(_attendanceKey);
     final studentRecordsRaw = prefs.getString(_studentRecordsKey);
@@ -79,6 +246,8 @@ class AppState extends ChangeNotifier {
     final weeklySelectionsRaw = prefs.getString(_weeklySelectionsKey);
     classId = _normalizeClassId(prefs.getString(_classIdKey) ?? '');
     deviceRole = prefs.getString(_deviceRoleKey) ?? '';
+    bigScreenExitPinVerifier = prefs.getString(_bigScreenExitPinVerifierKey) ?? '';
+    officerPinVerifier = prefs.getString(_officerPinVerifierKey) ?? '';
     lateThreshold = prefs.getString(_lateThresholdKey) ?? '07:30';
     darkMode = prefs.getBool(_darkModeKey) ?? false;
     final testNowRaw = prefs.getString(_testNowKey);
@@ -179,7 +348,8 @@ class AppState extends ChangeNotifier {
 
   void _syncPublicCloudListener() {
     final id = classId.trim();
-    final shouldWatch = cloudSyncEnabled && id.isNotEmpty && deviceRole == 'bigscreen';
+    // 大屏：套用全部公開資料。教師後台：只拿章數（大屏蓋章只寫在公開資料裡，教師後台以前收不到）
+    final shouldWatch = cloudSyncEnabled && id.isNotEmpty && (deviceRole == 'bigscreen' || deviceRole == 'teacher');
     if (!shouldWatch) {
       _publicCloudSubscription?.cancel();
       _publicCloudSubscription = null;
@@ -196,13 +366,41 @@ class AppState extends ChangeNotifier {
         if (_seatMutationPending || (_ignorePublicCloudUntil?.isAfter(DateTime.now()) ?? false)) return;
         cloudSyncError = null;
         lastCloudSyncAt = DateTime.now();
-        unawaited(applyPublicCloudData(data));
+        if (deviceRole == 'teacher') {
+          unawaited(_applyPublicSeatScores(data));
+        } else {
+          unawaited(applyPublicCloudData(data));
+        }
       },
       onError: (Object error, StackTrace stack) {
         cloudSyncError = error.toString();
         notifyListeners();
       },
     );
+  }
+
+  /// 教師後台：用雲端公開資料裡的章數更新自己的座位（只改章數，不動名字、位置）
+  Future<void> _applyPublicSeatScores(Map<String, dynamic> data) async {
+    final raw = data['seats'];
+    if (raw is! List) return;
+    final scores = <String, int>{};
+    for (final e in raw.whereType<Map>()) {
+      final number = '${e['number'] ?? ''}';
+      final score = e['score'];
+      if (number.isNotEmpty && score is num) scores[number] = score.toInt();
+    }
+    var changed = false;
+    for (final seat in seats) {
+      final s = scores[seat.number];
+      if (s != null && s != seat.score) {
+        seat.score = s;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    // 存到本機和教師的雲端資料，這樣下次打開也是最新的章數
+    await _save();
+    notifyListeners();
   }
 
   void _syncTeacherCloudListener() {
@@ -275,12 +473,24 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_diaryKey, jsonEncode(diary));
     await prefs.setString(_scheduleKey, jsonEncode(schedule));
     await prefs.setString(_diaryKey, jsonEncode(diaryEntries.map((e) => e.toJson()).toList()));
+    await prefs.setString(_timePeriodsKey, jsonEncode(timePeriods.map((e) => e.toJson()).toList()));
+    await prefs.setString(_teacherNoticeKey, jsonEncode(teacherNotice?.toJson()));
+    await prefs.setString(_dismissedNoticeKey, dismissedNoticeId);
+    await prefs.setString(_punishmentsKey, jsonEncode(punishments));
+    await prefs.setString(_materialFoldersKey, jsonEncode(materialFolders.map((e) => e.toJson()).toList()));
+    await prefs.setInt(_materialOpenDelayKey, materialOpenDelay);
+    await prefs.setString(_chromeProfilesKey, jsonEncode(chromeProfiles.map((e) => e.toJson()).toList()));
+    await prefs.setString(_policyTextKey, policyText);
+    await prefs.setString(_rewardsKey, jsonEncode(rewards.map((e) => e.toJson()).toList()));
+    await prefs.setString(_lessonRatingsKey, jsonEncode(lessonRatings));
     await prefs.setString(_scheduleKey, jsonEncode(scheduleEntries.map((e) => e.toJson()).toList()));
     await prefs.setString(_attendanceKey, jsonEncode(attendanceRecords.map((e) => e.toJson()).toList()));
     await prefs.setString(_studentRecordsKey, jsonEncode(studentRecords.map((e) => e.toJson()).toList()));
     await prefs.setString(_cleanlinessKey, jsonEncode(cleanlinessRecords.map((e) => e.toJson()).toList()));
     await prefs.setString(_photosKey, jsonEncode(classPhotos.map((e) => e.toJson()).toList()));
     await prefs.setString(_weeklySelectionsKey, jsonEncode(weeklySelections.map((e) => e.toJson()).toList()));
+    await prefs.setString(_bigScreenExitPinVerifierKey, bigScreenExitPinVerifier);
+    await prefs.setString(_officerPinVerifierKey, officerPinVerifier);
     if (syncCloud && cloudSyncEnabled && classId.isNotEmpty) {
       final snapshot = exportData();
       if (deviceRole == 'teacher') {
@@ -407,13 +617,30 @@ class AppState extends ChangeNotifier {
         data['seats'] is List ||
         data['diaryEntries'] is List ||
         data['scheduleEntries'] is List ||
+        data['timePeriods'] is List ||
+        data.containsKey('teacherNotice') ||
+        data['punishments'] is List ||
+        data['materialFolders'] is List ||
+        data['chromeProfiles'] is List ||
+        data['policyText'] is String ||
+        data['rewards'] is List ||
         data['attendanceToday'] is List ||
+        data['bigScreenExitPinVerifier'] is String ||
+        data['officerPinVerifier'] is String ||
         data.containsKey('testNow')) {
       final publicData = <String, dynamic>{
         'reminders': data['reminders'] ?? reminders.map((e) => e.toJson()).toList(),
         'seats': data['seats'] ?? seats.map((e) => e.toJson()).toList(),
         'diaryEntries': data['diaryEntries'] ?? diaryEntries.map((e) => e.toJson()).toList(),
         'scheduleEntries': data['scheduleEntries'] ?? scheduleEntries.map((e) => e.toJson()).toList(),
+        'timePeriods': data['timePeriods'] ?? timePeriods.map((e) => e.toJson()).toList(),
+        'teacherNotice': data.containsKey('teacherNotice') ? data['teacherNotice'] : teacherNotice?.toJson(),
+        'punishments': data['punishments'] ?? punishments,
+        'materialFolders': data['materialFolders'] ?? materialFolders.map((e) => e.toJson()).toList(),
+        'materialOpenDelay': data['materialOpenDelay'] ?? materialOpenDelay,
+        'chromeProfiles': data['chromeProfiles'] ?? chromeProfiles.map((e) => e.toJson()).toList(),
+        'policyText': data['policyText'] ?? policyText,
+        'rewards': data['rewards'] ?? rewards.map((e) => e.toJson()).toList(),
         'attendanceRecords': data['attendanceToday'] ?? <dynamic>[],
         'studentRecords': <dynamic>[],
         'cleanlinessRecords': <dynamic>[],
@@ -422,6 +649,8 @@ class AppState extends ChangeNotifier {
         'lateThreshold': data['lateThreshold'] ?? lateThreshold,
         'testNow': data['testNow'] is String ? data['testNow'] as String : null,
         'darkMode': darkMode,
+        if (data['bigScreenExitPinVerifier'] is String) 'bigScreenExitPinVerifier': data['bigScreenExitPinVerifier'],
+        if (data['officerPinVerifier'] is String) 'officerPinVerifier': data['officerPinVerifier'],
       };
       _applyPublicData(publicData);
       await _save(syncCloud: false);
@@ -446,6 +675,38 @@ class AppState extends ChangeNotifier {
         .whereType<Map>()
         .map((e) => ScheduleEntry.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    if (data.containsKey('teacherNotice')) {
+      teacherNotice = TeacherNotice.tryParse(data['teacherNotice']);
+    }
+    if (data['materialFolders'] is List) {
+      materialFolders = (data['materialFolders'] as List)
+          .whereType<Map>()
+          .map((e) => MaterialFolder.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (data['materialOpenDelay'] is num) materialOpenDelay = (data['materialOpenDelay'] as num).toInt();
+    if (data['chromeProfiles'] is List) {
+      chromeProfiles = (data['chromeProfiles'] as List)
+          .whereType<Map>()
+          .map((e) => ChromeProfile.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (data['policyText'] is String) policyText = data['policyText'] as String;
+    if (data['punishments'] is List) {
+      punishments = (data['punishments'] as List).map((e) => e.toString()).toList();
+    }
+    if (data['rewards'] is List) {
+      rewards = (data['rewards'] as List)
+          .whereType<Map>()
+          .map((e) => RewardItem.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (data['timePeriods'] is List) {
+      timePeriods = (data['timePeriods'] as List)
+          .whereType<Map>()
+          .map((e) => TimePeriod.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
     lateThreshold = data['lateThreshold'] as String? ?? lateThreshold;
     if (data.containsKey('testNow')) {
       final value = data['testNow'];
@@ -459,6 +720,12 @@ class AppState extends ChangeNotifier {
         .whereType<Map>()
         .map((e) => WeeklySelection.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    if (data['bigScreenExitPinVerifier'] is String) {
+      bigScreenExitPinVerifier = data['bigScreenExitPinVerifier'] as String;
+    }
+    if (data['officerPinVerifier'] is String) {
+      officerPinVerifier = data['officerPinVerifier'] as String;
+    }
     final today = _dateKey(DateTime.now());
     attendanceRecords.removeWhere((e) => e.date == today);
     final publicAttendance = ((data['attendanceRecords'] as List?) ?? [])
@@ -596,9 +863,8 @@ class AppState extends ChangeNotifier {
   Future<void> adjustSeatScore(int index, int delta) async {
     if (index < 0 || index >= seats.length) return;
     seats[index].score += delta;
-    if (deviceRole == 'bigscreen') {
-      _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
-    }
+    // 剛改完章數的 5 秒內不要被雲端的舊資料蓋回去（大屏和教師後台都一樣）
+    _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
     _seatMutationPending = true;
     notifyListeners();
     try {
@@ -617,9 +883,8 @@ class AppState extends ChangeNotifier {
     } else {
       seats[index].score += delta;
     }
-    if (deviceRole == 'bigscreen') {
-      _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
-    }
+    // 剛改完章數的 5 秒內不要被雲端的舊資料蓋回去（大屏和教師後台都一樣）
+    _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
     _seatMutationPending = true;
     notifyListeners();
     try {
@@ -771,6 +1036,173 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 老師傳送即時通知（給新的 id，大屏就會重新跳出來）
+  Future<void> sendTeacherNotice(TeacherNotice notice) async {
+    teacherNotice = notice.copy()..id = DateTime.now().millisecondsSinceEpoch.toString();
+    await _save();
+    notifyListeners();
+    unawaited(postEvent('bigscreen', '老師傳送了即時通知', teacherNotice!.text));
+  }
+
+  /// 老師收回通知（所有大屏都會關掉）
+  Future<void> clearTeacherNotice() async {
+    teacherNotice = null;
+    await _save();
+    notifyListeners();
+  }
+
+  /// 這台大屏關掉目前的通知（只影響本機）
+  Future<void> dismissTeacherNotice() async {
+    dismissedNoticeId = teacherNotice?.id ?? '';
+    await _save(syncCloud: false);
+    notifyListeners();
+  }
+
+  Future<void> savePolicyText(String value) async {
+    policyText = value;
+    await _save();
+    notifyListeners();
+  }
+
+  Future<void> saveChromeProfiles(List<ChromeProfile> value) async {
+    chromeProfiles = [for (final p in value) if (p.profileDir.trim().isNotEmpty) p];
+    await _save();
+    notifyListeners();
+  }
+
+  /// 依課表科目找要自動打開的 Chrome 使用者
+  List<ChromeProfile> chromeFor(String subject) =>
+      [for (final p in chromeProfiles) if (p.keywordList.isNotEmpty && p.matches(subject)) p];
+
+  Future<void> saveMaterialFolders(List<MaterialFolder> value, int delay) async {
+    materialFolders = [for (final m in value) if (m.path.trim().isNotEmpty) m];
+    materialOpenDelay = delay.clamp(0, 30);
+    await _save();
+    notifyListeners();
+  }
+
+  /// 舊資料補上新的課表科目名稱（例如「世界節慶萬花筒」開英語）
+  void _addMaterialKeyword(String name, String keyword) {
+    for (final m in materialFolders) {
+      if (m.name == name && !m.keywordList.contains(keyword)) {
+        m.keywords = m.keywords.trim().isEmpty ? keyword : '${m.keywords},$keyword';
+      }
+    }
+  }
+
+  /// 依課表科目找教材資料夾（找不到回傳 null）
+  MaterialFolder? materialFor(String subject) {
+    for (final m in materialFolders) {
+      if (m.keywordList.isNotEmpty && m.matches(subject)) return m;
+    }
+    return null;
+  }
+
+  Future<void> savePunishments(List<String> value) async {
+    punishments = [for (final p in value) if (p.trim().isNotEmpty) p.trim()];
+    await _save();
+    notifyListeners();
+  }
+
+  Future<void> saveRewards(List<RewardItem> value) async {
+    rewards = [for (final r in value) if (r.name.trim().isNotEmpty) RewardItem(name: r.name.trim(), cost: r.cost)];
+    await _save();
+    notifyListeners();
+  }
+
+  /// 同學兌換獎勵：扣章並留下紀錄。章不夠回傳 false。
+  Future<bool> redeemReward(int seatIndex, RewardItem reward) async {
+    if (seatIndex < 0 || seatIndex >= seats.length) return false;
+    final seat = seats[seatIndex];
+    if (seat.score < reward.cost) return false;
+    studentRecords.insert(
+        0,
+        StudentRecord(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          studentNumber: seat.number,
+          studentName: seat.name,
+          date: _dateKey(DateTime.now()),
+          time: _timeKey(DateTime.now()),
+          type: '兌換',
+          note: '${reward.name}（${reward.cost} 章）',
+        ));
+    await adjustSeatScore(seatIndex, -reward.cost);
+    unawaited(postEvent('teacher', '兌換獎勵', '${seat.name} 用 ${reward.cost} 章兌換「${reward.name}」'));
+    return true;
+  }
+
+  /// 發一則通知給另一邊（target：'teacher' 或 'bigscreen'）。失敗也不影響原本的動作。
+  Future<void> postEvent(String target, String title, [String body = '']) async {
+    if (!cloud.isConfigured || classId.trim().isEmpty) return;
+    try {
+      await cloud.pushEvent(classId, target: target, title: title, body: body);
+    } catch (_) {}
+  }
+
+  Future<void> setDiaryTextScale(double value) async {
+    diaryTextScale = value.clamp(0.5, 1.5);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_diaryTextScaleKey, diaryTextScale);
+    notifyListeners();
+  }
+
+  Future<void> markNotificationsSeen() async {
+    notifSeenAt = DateTime.now().millisecondsSinceEpoch;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_notifSeenKey, notifSeenAt);
+    notifyListeners();
+  }
+
+  /// 這節課是否已經評過分（key = 日期_節次）
+  bool isLessonRated(String key) => lessonRatings.any((e) => e['id'] == key);
+
+  /// 送出教師評分：存在本機，也存到雲端 classes/{班級}/ratings，並通知教師後台
+  Future<void> submitLessonRating({
+    required String key,
+    required String date,
+    required int lesson,
+    required String subject,
+    required int stars,
+  }) async {
+    final rating = <String, dynamic>{
+      'id': key,
+      'date': date,
+      'lesson': lesson,
+      'subject': subject,
+      'stars': stars,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    };
+    lessonRatings.removeWhere((e) => e['id'] == key);
+    lessonRatings.add(rating);
+    await _save(syncCloud: false);
+    notifyListeners();
+    if (cloud.isConfigured && classId.trim().isNotEmpty) {
+      try {
+        await cloud.pushRating(classId, rating);
+      } catch (_) {}
+    }
+    unawaited(postEvent('teacher', '教師評分：第 ${lesson + 1} 節 $subject', '${'★' * stars}${'☆' * (5 - stars)}'));
+  }
+
+  /// 大屏現在要不要顯示通知
+  bool get showTeacherNotice => teacherNotice != null && teacherNotice!.id != dismissedNoticeId;
+
+  Future<void> saveTimePeriods(List<TimePeriod> value) async {
+    timePeriods = [...value]..sort((a, b) => a.startMinutes.compareTo(b.startMinutes));
+    await _save();
+    notifyListeners();
+  }
+
+  /// 現在所在的特殊顯示時段；[overrideOnly] 為 true 時只找「蓋過上課」的時段
+  TimePeriod? periodAt(DateTime time, {bool overrideOnly = false}) {
+    final minutes = time.hour * 60 + time.minute;
+    for (final p in timePeriods) {
+      if (overrideOnly && !p.overrideLesson) continue;
+      if (p.startMinutes >= 0 && minutes >= p.startMinutes && minutes < p.endMinutes) return p;
+    }
+    return null;
+  }
+
   Future<void> saveDiaryEntries(List<DiaryEntry> value) async {
     diaryEntries = value;
     await _save();
@@ -900,6 +1332,7 @@ class AppState extends ChangeNotifier {
     try {
       if (!cloudSyncEnabled || classId.isEmpty) return false;
       await cloud.pushRegistration(classId, data);
+      unawaited(postEvent('teacher', '新的登記：$type', '${student.number} ${student.name}${note.isEmpty ? '' : '・$note'}'));
       return true;
     } catch (error) {
       cloudSyncError = error.toString();
@@ -989,6 +1422,14 @@ class AppState extends ChangeNotifier {
         'seats': seats.map((e) => e.toJson()).toList(),
         'diaryEntries': diaryEntries.map((e) => e.toJson()).toList(),
         'scheduleEntries': scheduleEntries.map((e) => e.toJson()).toList(),
+        'timePeriods': timePeriods.map((e) => e.toJson()).toList(),
+        'teacherNotice': teacherNotice?.toJson(),
+        'punishments': punishments,
+        'materialFolders': materialFolders.map((e) => e.toJson()).toList(),
+        'materialOpenDelay': materialOpenDelay,
+        'chromeProfiles': chromeProfiles.map((e) => e.toJson()).toList(),
+        'policyText': policyText,
+        'rewards': rewards.map((e) => e.toJson()).toList(),
         'darkMode': darkMode,
         'testNow': testNow?.toIso8601String(),
         'attendanceRecords': attendanceRecords.map((e) => e.toJson()).toList(),
@@ -997,6 +1438,8 @@ class AppState extends ChangeNotifier {
         'classPhotos': classPhotos.map((e) => e.toJson()).toList(),
         'weeklySelections': weeklySelections.map((e) => e.toJson()).toList(),
         'lateThreshold': lateThreshold,
+        'bigScreenExitPinVerifier': bigScreenExitPinVerifier,
+        'officerPinVerifier': officerPinVerifier,
       };
 
   Future<void> exportToFile(String path) async {
@@ -1063,6 +1506,30 @@ class AppState extends ChangeNotifier {
         .whereType<Map>()
         .map((e) => CleanlinessRecord.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+    timePeriods = ((data['timePeriods'] as List?) ?? [])
+        .whereType<Map>()
+        .map((e) => TimePeriod.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+    teacherNotice = TeacherNotice.tryParse(data['teacherNotice']);
+    punishments = ((data['punishments'] as List?) ?? []).map((e) => e.toString()).toList();
+    if (data['materialFolders'] is List) {
+      materialFolders = (data['materialFolders'] as List)
+          .whereType<Map>()
+          .map((e) => MaterialFolder.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (data['materialOpenDelay'] is num) materialOpenDelay = (data['materialOpenDelay'] as num).toInt();
+    if (data['chromeProfiles'] is List) {
+      chromeProfiles = (data['chromeProfiles'] as List)
+          .whereType<Map>()
+          .map((e) => ChromeProfile.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    if (data['policyText'] is String) policyText = data['policyText'] as String;
+    rewards = ((data['rewards'] as List?) ?? [])
+        .whereType<Map>()
+        .map((e) => RewardItem.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
     lateThreshold = data['lateThreshold'] as String? ?? '07:30';
     classPhotos = ((data['classPhotos'] as List?) ?? [])
         .whereType<Map>()
@@ -1072,7 +1539,15 @@ class AppState extends ChangeNotifier {
         .whereType<Map>()
         .map((e) => WeeklySelection.fromJson(Map<String, dynamic>.from(e)))
         .toList();
-    darkMode = data['darkMode'] as bool? ?? false;
+    if (data['bigScreenExitPinVerifier'] is String) {
+      bigScreenExitPinVerifier = data['bigScreenExitPinVerifier'] as String;
+    }
+    if (data['officerPinVerifier'] is String) {
+      officerPinVerifier = data['officerPinVerifier'] as String;
+    }
+    if (data['darkMode'] is bool) {
+      darkMode = data['darkMode'] as bool;
+    }
     if (!preserveTestNow) {
       testNow = data['testNow'] is String ? DateTime.tryParse(data['testNow'] as String) : null;
     }

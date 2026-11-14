@@ -25,3 +25,5 @@ functions/.env.*
 !functions/.env.example
 
 **/node_modules/
+# Widget Preview related
+.widget_preview/

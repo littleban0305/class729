@@ -64,7 +64,8 @@ void main() {
     expect(reminder.isActiveAt(DateTime(2026, 9, 18, 12, 30)), isFalse);
   });
 
-  test('class reminders trigger auto evaluation when the end time is reached', () {
+  test('class reminders trigger auto evaluation when the end time is reached',
+      () {
     final reminder = ReminderData(
       title: '數學課',
       content: '分數與圖形',
@@ -75,12 +76,13 @@ void main() {
       autoEvaluationEnabled: true,
     );
 
-    expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 30)), isFalse);
+    expect(
+        reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 30)), isFalse);
     expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 40)), isTrue);
     expect(reminder.shouldAutoEvaluateAt(DateTime(2026, 9, 17, 8, 41)), isTrue);
   });
 
-  test('teacher password remains intact when private snapshot merges across devices', () {
+  test('legacy teacher password is removed from private snapshots', () {
     final merged = CloudSyncService.mergePrivateState(
       existing: {
         'teacherPassword': 'OldSecret123',
@@ -95,12 +97,13 @@ void main() {
       },
     );
 
-    expect(merged['teacherPassword'], 'OldSecret123');
+    expect(merged.containsKey('teacherPassword'), isFalse);
     expect(merged['reminders'], isA<List>());
     expect(merged['reminders'][0]['title'], 'new');
   });
 
-  test('firebase options are available for macOS so cloud sync can initialize', () {
+  test('firebase options are available for macOS so cloud sync can initialize',
+      () {
     final options = DefaultFirebaseOptions.forPlatform(TargetPlatform.macOS);
 
     expect(options.projectId, 'class-729-app');
@@ -108,7 +111,8 @@ void main() {
     expect(options.apiKey, isNotEmpty);
   });
 
-  test('public cloud data applies the preview test time across devices', () async {
+  test('public cloud data applies the preview test time across devices',
+      () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -201,7 +205,8 @@ void main() {
     expect(seat.score, 8);
   });
 
-  test('on-time attendance gives a bonus and discipline records deduct points', () async {
+  test('on-time attendance gives a bonus and discipline records deduct points',
+      () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -210,11 +215,13 @@ void main() {
       SeatData(number: '1', name: '小明', row: 0, slot: 0, score: 0),
     ];
 
-    await state.recordAttendance(state.seats[0], at: DateTime(2026, 9, 23, 7, 15), late: false);
+    await state.recordAttendance(state.seats[0],
+        at: DateTime(2026, 9, 23, 7, 15), late: false);
     expect(state.seats[0].score, 1);
     expect(state.studentRecords.first.type, '不遲到加分');
 
-    await state.addStudentRecord(student: state.seats[0], type: '被記扣分', note: '吵鬧');
+    await state.addStudentRecord(
+        student: state.seats[0], type: '被記扣分', note: '吵鬧');
     expect(state.seats[0].score, 0);
     expect(state.studentRecords.first.type, '被記扣分');
   });
@@ -254,7 +261,8 @@ void main() {
 
     final rightState = AppState();
     rightState.seats = [
-      for (var row = 0; row < 6; row++) SeatData(number: '${row + 1}-1', name: 'S$row', row: row, slot: 0),
+      for (var row = 0; row < 6; row++)
+        SeatData(number: '${row + 1}-1', name: 'S$row', row: row, slot: 0),
     ];
 
     await rightState.rotateSeats(1);
@@ -276,8 +284,10 @@ void main() {
 
     final state = AppState();
     state.seats = [
-      SeatData(number: '1-1', name: 'A', row: 0, slot: 0, gender: '男', score: 3),
-      SeatData(number: '2-1', name: 'B', row: 1, slot: 0, gender: '女', score: 5),
+      SeatData(
+          number: '1-1', name: 'A', row: 0, slot: 0, gender: '男', score: 3),
+      SeatData(
+          number: '2-1', name: 'B', row: 1, slot: 0, gender: '女', score: 5),
     ];
 
     await state.swapSeats(0, 1);
@@ -296,7 +306,8 @@ void main() {
     expect(state.seats[1].score, 5);
   });
 
-  testWidgets('seat board drag swaps visible cards', (WidgetTester tester) async {
+  testWidgets('seat board drag swaps visible cards',
+      (WidgetTester tester) async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -317,7 +328,8 @@ void main() {
     expect(state.seats.firstWhere((seat) => seat.name == 'B').row, 0);
   });
 
-  testWidgets('big screen seat board is not draggable', (WidgetTester tester) async {
+  testWidgets('big screen seat board is not draggable',
+      (WidgetTester tester) async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -333,7 +345,8 @@ void main() {
     expect(find.byType(Draggable<int>), findsNothing);
   });
 
-  testWidgets('big screen score panel updates without closing', (WidgetTester tester) async {
+  testWidgets('big screen score panel updates without closing',
+      (WidgetTester tester) async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -354,7 +367,8 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget);
   });
 
-  testWidgets('big screen diary entries display daily numbers', (WidgetTester tester) async {
+  testWidgets('big screen diary entries display daily numbers',
+      (WidgetTester tester) async {
     TestWidgetsFlutterBinding.ensureInitialized();
     SharedPreferences.setMockInitialValues({});
 
@@ -388,7 +402,9 @@ void main() {
     expect(state.seats[0].slot, 1);
   });
 
-  test('reminder element rotation is preserved through copy and JSON conversion', () {
+  test(
+      'reminder element rotation is preserved through copy and JSON conversion',
+      () {
     final element = ReminderElementData(
       id: 'rotated-text',
       type: 'text',

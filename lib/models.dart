@@ -539,3 +539,270 @@ class DiaryEntry {
         content: json['content'] as String? ?? '',
       );
 }
+
+/// 特殊顯示時段（非上課）：開始、結束（HH:mm）與大屏要顯示的文字。
+/// 上課時段一律由課表決定；[overrideLesson] 勾選時，這段時間會蓋過上課（段考、朝會、活動用）。
+class TimePeriod {
+  String start;
+  String end;
+  String text;
+  bool overrideLesson;
+  /// 這段時間大屏首頁黃色按鈕要做什麼（見 [TimePeriod.actions]）
+  String action;
+
+  TimePeriod({
+    required this.start,
+    required this.end,
+    required this.text,
+    this.overrideLesson = false,
+    this.action = 'minimize',
+  });
+
+  /// 黃色按鈕可以設定的動作：值 → (選單名稱, 按鈕文字)
+  static const actions = <String, (String, String)>{
+    'minimize': ('最小化（開始上課）', '開始上課'),
+    'attendance': ('打開簽到頁', '簽到'),
+    'stamp': ('打開蓋章頁（管理者專用）', '蓋章（管理者專用）'),
+    'diary': ('打開聯絡簿', '聯絡簿'),
+    'schedule': ('打開課表', '課表'),
+    'pick': ('開始選號', '選號機'),
+    'none': ('不顯示按鈕', ''),
+  };
+
+  int get startMinutes => _toMinutes(start);
+  int get endMinutes => _toMinutes(end);
+
+  static int _toMinutes(String value) {
+    final parts = value.split(':');
+    if (parts.length < 2) return -1;
+    return (int.tryParse(parts[0]) ?? 0) * 60 + (int.tryParse(parts[1]) ?? 0);
+  }
+
+  Map<String, dynamic> toJson() =>
+      {'start': start, 'end': end, 'text': text, 'override': overrideLesson, 'action': action};
+
+  factory TimePeriod.fromJson(Map<String, dynamic> json) => TimePeriod(
+        start: json['start'] as String? ?? '',
+        end: json['end'] as String? ?? '',
+        text: json['text'] as String? ?? '',
+        overrideLesson: json['override'] as bool? ?? false,
+        action: json['action'] as String? ?? 'minimize',
+      );
+
+  /// 伊洛手寫的 729 作息表（只留非上課時段；上課看課表，課與課之間自動顯示「下課」）
+  static List<TimePeriod> defaults() => [
+        for (final row in const [
+          ['00:00', '07:30', '正常簽到', 'attendance'],
+          ['07:30', '08:00', '遲到簽到', 'attendance'],
+          ['08:00', '08:15', '早自習'],
+          ['11:55', '12:05', '午餐下課'],
+          ['12:05', '12:25', '吃飯'],
+          ['12:25', '12:35', '中午下課'],
+          ['12:35', '13:05', '午休'],
+          ['14:55', '15:15', '打掃時間'],
+          ['16:00', '23:59', '放學'],
+        ])
+          TimePeriod(start: row[0], end: row[1], text: row[2], action: row.length > 3 ? row[3] : 'minimize'),
+      ];
+}
+
+/// 一段文字的格式（大小、粗體、斜體、底線、顏色）
+class NoticeStyle {
+  final double size;
+  final bool bold;
+  final bool italic;
+  final bool underline;
+  final int color;
+
+  const NoticeStyle({
+    this.size = 64,
+    this.bold = true,
+    this.italic = false,
+    this.underline = false,
+    this.color = 0xFF272343,
+  });
+
+  NoticeStyle copyWith({double? size, bool? bold, bool? italic, bool? underline, int? color}) => NoticeStyle(
+        size: size ?? this.size,
+        bold: bold ?? this.bold,
+        italic: italic ?? this.italic,
+        underline: underline ?? this.underline,
+        color: color ?? this.color,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is NoticeStyle &&
+      other.size == size &&
+      other.bold == bold &&
+      other.italic == italic &&
+      other.underline == underline &&
+      other.color == color;
+
+  @override
+  int get hashCode => Object.hash(size, bold, italic, underline, color);
+
+  Map<String, dynamic> toJson() => {
+        'size': size,
+        'bold': bold,
+        'italic': italic,
+        'underline': underline,
+        'color': color,
+      };
+
+  factory NoticeStyle.fromJson(Map<String, dynamic> json) => NoticeStyle(
+        size: (json['size'] as num?)?.toDouble() ?? 64,
+        bold: json['bold'] as bool? ?? true,
+        italic: json['italic'] as bool? ?? false,
+        underline: json['underline'] as bool? ?? false,
+        color: (json['color'] as num?)?.toInt() ?? 0xFF272343,
+      );
+}
+
+/// 同一種格式的一段連續文字
+class NoticeSpan {
+  final String text;
+  final NoticeStyle style;
+  const NoticeSpan(this.text, this.style);
+
+  Map<String, dynamic> toJson() => {'text': text, ...style.toJson()};
+
+  factory NoticeSpan.fromJson(Map<String, dynamic> json) =>
+      NoticeSpan(json['text'] as String? ?? '', NoticeStyle.fromJson(json));
+}
+
+/// 教師即時通知：一大段文字，每一段字可以有自己的格式；對齊是整段一起。
+class TeacherNotice {
+  String id;
+  List<NoticeSpan> spans;
+  /// 'left' / 'center' / 'right'
+  String align;
+
+  TeacherNotice({required this.id, List<NoticeSpan>? spans, this.align = 'center'}) : spans = spans ?? [];
+
+  String get text => spans.map((s) => s.text).join();
+
+  TeacherNotice copy() => TeacherNotice.fromJson(toJson());
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'spans': spans.map((s) => s.toJson()).toList(),
+        'align': align,
+      };
+
+  factory TeacherNotice.fromJson(Map<String, dynamic> json) {
+    final raw = json['spans'];
+    List<NoticeSpan> spans;
+    if (raw is List) {
+      spans = raw.whereType<Map>().map((e) => NoticeSpan.fromJson(Map<String, dynamic>.from(e))).toList();
+    } else {
+      // 舊版（整段同一格式）
+      final text = json['text'] as String? ?? '';
+      spans = text.isEmpty
+          ? []
+          : [
+              NoticeSpan(
+                text,
+                NoticeStyle(
+                  size: (json['fontSize'] as num?)?.toDouble() ?? 64,
+                  bold: json['bold'] as bool? ?? true,
+                  italic: json['italic'] as bool? ?? false,
+                  underline: json['underline'] as bool? ?? false,
+                  color: (json['color'] as num?)?.toInt() ?? 0xFF272343,
+                ),
+              )
+            ];
+    }
+    return TeacherNotice(id: json['id'] as String? ?? '', spans: spans, align: json['align'] as String? ?? 'center');
+  }
+
+  static TeacherNotice? tryParse(Object? raw) =>
+      raw is Map ? TeacherNotice.fromJson(Map<String, dynamic>.from(raw)) : null;
+}
+
+/// 兌換獎勵的項目：名稱＋要花幾個章
+class RewardItem {
+  String name;
+  int cost;
+  RewardItem({required this.name, this.cost = 1});
+
+  Map<String, dynamic> toJson() => {'name': name, 'cost': cost};
+
+  factory RewardItem.fromJson(Map<String, dynamic> json) =>
+      RewardItem(name: json['name'] as String? ?? '', cost: (json['cost'] as num?)?.toInt() ?? 1);
+}
+
+/// 教材資料夾：課表科目名稱裡有 keywords 其中一個字，就打開 path
+class MaterialFolder {
+  String name;
+  /// 用逗號分開的關鍵字，例如「英語,英文」
+  String keywords;
+  String path;
+  MaterialFolder({required this.name, required this.keywords, required this.path});
+
+  List<String> get keywordList =>
+      keywords.split(RegExp(r'[,，、\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+  bool matches(String subject) => keywordList.any((k) => subject.contains(k));
+
+  Map<String, dynamic> toJson() => {'name': name, 'keywords': keywords, 'path': path};
+
+  factory MaterialFolder.fromJson(Map<String, dynamic> json) => MaterialFolder(
+        name: json['name'] as String? ?? '',
+        keywords: json['keywords'] as String? ?? '',
+        path: json['path'] as String? ?? '',
+      );
+
+  /// 預設：學校 \\10.194.4.249\media 的各科教材
+  static List<MaterialFolder> defaults() {
+    const root = r'\\10.194.4.249\media';
+    const ebook = '$root\\@各科電子書、題庫';
+    return [
+      for (final r in const [
+        ['本土語', '本土語,閩南語,台語', '$root\\14 本土語-閩南語\\114學年 育達版本\\01-1 國中台語文(甲版)第1冊-教學簡報(OK)'],
+        ['健教', '健教,健康', '$root\\07健體領域\\亞群\\115學年度'],
+        ['家政', '家政', '$root\\08綜合領域\\01家政\\楊雅荃'],
+        ['論語播講', '論語', '$root\\115學年度論語播講'],
+        ['LiveABC', 'LiveABC', '$root\\@Video\\LiveABC'],
+        ['輔導', '輔導', '$root\\07健體領域\\錦怡\\輔導\\七'],
+        ['美術', '美術,視覺藝術', '$root\\06藝術領域\\02美術\\昱馨'],
+        ['國文', '國文', '$ebook\\康軒\\康軒115上學期ISO\\01.國文\\01_115國中國文1上電子書_0812更新'],
+        ['數學', '數學', '$ebook\\翰林\\115上\\03數學ok\\電子書ok'],
+        ['英語', '英語,英文,世界節慶萬花筒', '$ebook\\翰林\\115上\\02英文ok\\電子書ok'],
+        ['公民', '公民', '$ebook\\康軒\\康軒115上學期ISO\\07.公民'],
+        ['地理', '地理,全球與鄉土', '$ebook\\康軒\\康軒115上學期ISO\\05.地理'],
+        ['歷史', '歷史', '$ebook\\康軒\\康軒115上學期ISO\\06.歷史'],
+        ['生物', '生物,自然', '$ebook\\康軒\\康軒115上學期ISO\\04.自然'],
+        ['康軒主目錄', '', '$ebook\\康軒\\康軒115上學期ISO'],
+        ['翰林主目錄', '', '$ebook\\翰林\\115上'],
+      ])
+        MaterialFolder(name: r[0], keywords: r[1], path: r[2]),
+    ];
+  }
+}
+
+/// Chrome 使用者：用指定的使用者（設定檔資料夾）打開 Chrome，可以順便開網址；
+/// 填了課表科目的話，跟教材一起在下課後自動打開
+class ChromeProfile {
+  String name;
+  /// Chrome 內部的設定檔資料夾名稱，例如 Default、Profile 1
+  String profileDir;
+  String url;
+  String keywords;
+  ChromeProfile({required this.name, required this.profileDir, this.url = '', this.keywords = ''});
+
+  List<String> get keywordList =>
+      keywords.split(RegExp(r'[,，、\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+  bool matches(String subject) => keywordList.any((k) => subject.contains(k));
+
+  Map<String, dynamic> toJson() => {'name': name, 'profileDir': profileDir, 'url': url, 'keywords': keywords};
+
+  factory ChromeProfile.fromJson(Map<String, dynamic> json) => ChromeProfile(
+        name: json['name'] as String? ?? '',
+        profileDir: json['profileDir'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+        keywords: json['keywords'] as String? ?? '',
+      );
+}
+

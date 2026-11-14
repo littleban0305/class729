@@ -1,6 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'app_state.dart';
 import 'firebase_config_flag.dart';
@@ -10,24 +9,33 @@ import 'main.dart'
         MainShell,
         ReminderPresentation,
         LotteryPage,
-        SeatPage,
         DiaryPage,
         SchedulePage,
-        TeacherMobileDrawer,
-        WindowBar,
-        SideBar;
-import 'services/auth_service.dart';
+        BigScreenHomePage,
+        BigScreenTopBar,
+        BigScreenPages,
+        StampPage,
+        AppIcons,
+        AutoHideBar,
+        BigScreenPageFrame,
+        BigScreenSeatGrid,
+        showPinEntryDialog,
+        showSettingsWindow,
+        showSettingsWindowAfterPin,
+        ProjectedTextOverlay,
+        TeacherNoticeOverlay,
+        NotificationBell,
+        showOfficerPinDialog,
+        LessonRatingWatcher,
+        MaterialAutoOpener;
 
 /// Decides what a device is allowed to see: an unconfigured device must pick a
-/// role first, a "大屏" device only gets the public classroom interface and attendance, with editable 聯絡簿 as a limited exception, and
-/// a "教師" device must log in (when cloud is configured) before reaching [MainShell].
+/// role first, a "大屏" device only gets the public classroom interface and attendance, with editable 聯絡簿 as a limited exception.
 class DeviceRoleGate extends StatefulWidget {
   final AppState state;
-  final ValueChanged<ThemeMode> onThemeModeChanged;
   const DeviceRoleGate({
     super.key,
     required this.state,
-    required this.onThemeModeChanged,
   });
 
   @override
@@ -44,10 +52,7 @@ class _DeviceRoleGateState extends State<DeviceRoleGate> {
           case 'bigscreen':
             return BigScreenDeviceShell(state: widget.state);
           case 'teacher':
-            return AuthGate(
-              state: widget.state,
-              onThemeModeChanged: widget.onThemeModeChanged,
-            );
+            return TeacherPinGate(state: widget.state);
           default:
             return DeviceRoleSetupPage(state: widget.state);
         }
@@ -64,51 +69,66 @@ class DeviceRoleSetupPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    '729',
-                    style: TextStyle(fontSize: 40, fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('這台裝置要作為什麼用途？', style: TextStyle(fontSize: 18)),
-                  const SizedBox(height: 28),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(
-                        Icons.admin_panel_settings_outlined,
-                        size: 32,
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        '729',
+                        style: TextStyle(fontSize: 40, fontWeight: FontWeight.w900),
                       ),
-                      title: const Text(
-                        '教師管理裝置',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                      const SizedBox(height: 8),
+                      const Text('這台裝置要作為什麼用途？', style: TextStyle(fontSize: 18)),
+                      const SizedBox(height: 28),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.admin_panel_settings_outlined,
+                            size: 32,
+                          ),
+                          title: const Text(
+                            '教師管理裝置',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => state.setDeviceRole('teacher'),
+                        ),
                       ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => state.setDeviceRole('teacher'),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.tv_outlined, size: 32),
-                      title: const Text(
-                        '大屏 / 簽到裝置',
-                        style: TextStyle(fontWeight: FontWeight.w800),
+                      const SizedBox(height: 14),
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.tv_outlined, size: 32),
+                          title: const Text(
+                            '大屏 / 簽到裝置',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => state.setDeviceRole('bigscreen'),
+                        ),
                       ),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => state.setDeviceRole('bigscreen'),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          ),
+            AutoHideBar(
+              child: BigScreenTopBar(
+                icons: const [],
+                labels: const [],
+                current: 0,
+                onSelect: (_) {},
+                onBack: () {},
+                showBackButton: false,
+                onOpenSettings: () => showSettingsWindow(context, state),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -125,110 +145,125 @@ class BigScreenDeviceShell extends StatefulWidget {
 }
 
 class _BigScreenDeviceShellState extends State<BigScreenDeviceShell> {
-  int page = 0;
-  bool compact = false;
+  int page = BigScreenPages.home;
+  String? projectedText; // 頂端列投放的文字；null 代表沒有在投放
 
-  final labels = const ['提醒', '登記', '選號', '座位表', '聯絡簿', '課表'];
+  // 順序對應 BigScreenPages
+  final labels = const ['首頁', '登記（管理者專用）', '選號機', '提醒', '座位表', '課表', '聯絡簿'];
   final icons = const [
-    Icons.notifications_none,
-    Icons.assignment_outlined,
-    Icons.casino_outlined,
-    Icons.grid_view_outlined,
-    Icons.menu_book_outlined,
-    Icons.calendar_month_outlined,
+    AppIcons.dashboard,
+    AppIcons.clipboardPen,
+    AppIcons.dice,
+    AppIcons.bell,
+    AppIcons.grid,
+    AppIcons.calendar,
+    AppIcons.book,
   ];
+
+  Future<void> _go(int value) async {
+    // 進入蓋章頁要先輸入管理者 PIN 碼
+    if (value == BigScreenPages.registration && page != value) {
+      if (!await showOfficerPinDialog(context, widget.state) || !mounted) return;
+    }
+    setState(() => page = value);
+  }
+
+  Future<void> _back() async {
+    if (page != BigScreenPages.home) {
+      _go(BigScreenPages.home);
+      return;
+    }
+    final ok = await showPinEntryDialog(context, widget.state);
+    if (ok) {
+      await widget.state.setDeviceRole('');
+    }
+  }
+
   Widget _page() {
     switch (page) {
-      case 1:
-        return BigScreenRegistrationPage(state: widget.state);
-      case 2:
-        return LotteryPage(state: widget.state);
-      case 3:
-        return SeatPage(state: widget.state);
-      case 4:
-        return DiaryPage(state: widget.state, editable: true);
-      case 5:
-        return SchedulePage(state: widget.state, editable: false);
-      case 0:
+      // 每一頁都套上跟首頁一樣的外框與風格
+      case BigScreenPages.registration:
+        return BigScreenPageFrame(child: StampPage(state: widget.state));
+      case BigScreenPages.lottery:
+        return BigScreenPageFrame(child: LotteryPage(state: widget.state));
+      case BigScreenPages.reminders:
+        return BigScreenPageFrame(child: ReminderPresentation(state: widget.state));
+      case BigScreenPages.seats:
+        return BigScreenPageFrame(
+          panel: false,
+          child: AnimatedBuilder(
+            animation: widget.state,
+            builder: (_, __) => BigScreenSeatGrid(state: widget.state),
+          ),
+        );
+      case BigScreenPages.schedule:
+        return BigScreenPageFrame(child: SchedulePage(state: widget.state, editable: false));
+      case BigScreenPages.diary:
+        return BigScreenPageFrame(child: DiaryPage(state: widget.state, editable: true));
+      case BigScreenPages.home:
       default:
-        return ReminderPresentation(state: widget.state);
+        return AnimatedBuilder(
+          animation: widget.state,
+          builder: (_, __) => BigScreenHomePage(state: widget.state),
+        );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final mobile = MediaQuery.sizeOf(context).width < 720;
+    // 頂端列浮在內容上方，圓角外面露出的是內容本身的底色
     return Scaffold(
-      drawer: mobile
-          ? TeacherMobileDrawer(
-              labels: labels,
-              icons: icons,
-              current: page,
-              onSelect: (value) => setState(() => page = value),
-              extraItems: [
-                ListTile(
-                  leading: const Icon(Icons.logout_outlined),
-                  title: const Text('退出'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await widget.state.setDeviceRole('');
-                  },
-                ),
-              ],
-            )
-          : null,
-      body: mobile
-          ? SafeArea(
-              top: true,
-              bottom: false,
-              child: Stack(
-                children: [
-                  Column(
-                    children: [
-                      Builder(
-                        builder: (barContext) => WindowBar(
-                          title: labels[page],
-                          mobile: mobile,
-                          onOpenMenu: () => Scaffold.of(barContext).openDrawer(),
-                        ),
-                      ),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 160),
-                          child: _page(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              top: 10,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                child: KeyedSubtree(key: ValueKey<int>(page), child: _page()),
               ),
-            )
-          : Stack(
-              children: [
-                Column(
-                  children: [
-                    const WindowBar(title: '大屏'),
-                    Expanded(
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 160),
-                        child: _page(),
-                      ),
-                    ),
-                  ],
-                ),
-                SideBar(
-                  expanded: !compact,
-                  current: page,
-                  labels: labels,
-                  icons: icons,
-                  onSelect: (value) => setState(() => page = value),
-                  onToggle: () => setState(() => compact = !compact),
-                  onExit: () async {
-                    await widget.state.setDeviceRole('');
-                  },
-                ),
-              ],
             ),
+            if (projectedText != null)
+              Positioned.fill(
+                child: ProjectedTextOverlay(
+                  text: projectedText!,
+                  onClose: () => setState(() => projectedText = null),
+                ),
+              ),
+            AutoHideBar(
+              // 跳頁按鈕都拿掉了；中間是投放輸入框，左邊返回、右邊設定與視窗按鈕
+              child: BigScreenTopBar(
+                icons: const [],
+                labels: const [],
+                current: page,
+                onSelect: _go,
+                onBack: _back,
+                onOpenSettings: () => showSettingsWindow(context, widget.state),
+                onProject: (text) => setState(() => projectedText = text),
+                notificationButton: NotificationBell(state: widget.state, target: 'bigscreen'),
+              ),
+            ),
+            // 教師評分：下課那一瞬間跳出
+            Positioned.fill(child: LessonRatingWatcher(state: widget.state, bringToFront: true)),
+            // 下課後自動打開下一節的教材資料夾（看不見）
+            Positioned(left: 0, top: 0, child: MaterialAutoOpener(state: widget.state)),
+            // 教師即時通知：蓋在最上層，只有大屏點叉叉或灰色背景才會關
+            Positioned.fill(
+              child: AnimatedBuilder(
+                animation: widget.state,
+                builder: (context, _) => widget.state.showTeacherNotice
+                    ? TeacherNoticeOverlay(
+                        notice: widget.state.teacherNotice!,
+                        onClose: widget.state.dismissTeacherNotice,
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -476,16 +511,22 @@ class _BigScreenAttendancePageState extends State<BigScreenAttendancePage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('確認簽到'),
-        content: Text('${student.name}\n${late ? '目前將記錄為遲到。' : '目前將記錄為準時。'}\n確定要簽到嗎？'),
+        title: Text(student.name, style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900)),
+        content: Text(late ? '遲到' : '準時',
+            style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: late ? const Color(0xFFE07A00) : const Color(0xFF2E9E5B))),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('取消'),
           ),
           FilledButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('確認簽到'),
+            child: const Text('簽到'),
           ),
         ],
       ),
@@ -555,10 +596,29 @@ class _BigScreenAttendancePageState extends State<BigScreenAttendancePage> {
                       final student = students[index];
                       final already = signed.contains(student.number);
                       final existing = already ? records.firstWhere((e) => e.studentNumber == student.number) : null;
-                      return FilledButton.tonal(
+                      // 沒簽到：男藍、女粉；已簽到：灰色；遲到：淡橘
+                      final isDark = Theme.of(context).brightness == Brightness.dark;
+                      final Color bg = isDark
+                          ? Theme.of(context).colorScheme.surfaceContainerHigh
+                          : already
+                              ? (existing!.late ? const Color(0xFFFFE7C2) : const Color(0xFFECEEF1))
+                              : student.gender == '男'
+                                  ? const Color(0xFFDCEBFF)
+                                  : student.gender == '女'
+                                      ? const Color(0xFFFFE1EC)
+                                      : const Color(0xFFFFFFFE);
+                      final fg = isDark
+                          ? Theme.of(context).colorScheme.onSurface
+                          : (already ? const Color(0xFF5A5F75) : const Color(0xFF272343));
+                      return FilledButton(
                         onPressed:
                             already || pending.contains(student.number) ? null : () => _confirmAttendance(student),
                         style: FilledButton.styleFrom(
+                            backgroundColor: bg,
+                            foregroundColor: fg,
+                            disabledBackgroundColor: bg,
+                            disabledForegroundColor: fg,
+                            side: BorderSide(color: Theme.of(context).colorScheme.outline, width: 1),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18))),
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           Text(student.number, style: const TextStyle(fontSize: 12)),
@@ -603,159 +663,227 @@ Future<void> showDeviceSettingsDialog(BuildContext context, AppState state) asyn
   controller.dispose();
 }
 
-class AuthGate extends StatefulWidget {
+class TeacherPinGate extends StatefulWidget {
   final AppState state;
-  final ValueChanged<ThemeMode> onThemeModeChanged;
-  const AuthGate({
+  const TeacherPinGate({
     super.key,
     required this.state,
-    required this.onThemeModeChanged,
   });
 
   @override
-  State<AuthGate> createState() => _AuthGateState();
+  State<TeacherPinGate> createState() => _TeacherPinGateState();
 }
 
-class _AuthGateState extends State<AuthGate> {
-  final auth = AuthService();
-  bool? signedIn;
+class _TeacherPinGateState extends State<TeacherPinGate> {
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
+  bool _ready = false;
+  bool _unlocked = false;
+  bool _openSettingsAfterUnlock = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadSignInState();
+    _loadPin();
   }
-
-  Future<void> _loadSignInState() async {
-    final value = await auth.isSignedIn;
-    if (!mounted) return;
-    setState(() => signedIn = value);
-    if (value && widget.state.classId.isNotEmpty && widget.state.cloudSyncEnabled) {
-      unawaited(_pullCloudInBackground());
-    }
-  }
-
-  Future<void> _pullCloudInBackground() async {
-    try {
-      await widget.state.pullFromCloud().timeout(const Duration(seconds: 8));
-    } catch (error) {
-      widget.state.setCloudSyncError('登入後同步逾時，已先使用本機資料');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (signedIn == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    if (signedIn!) {
-      return MainShell(
-        state: widget.state,
-        onThemeModeChanged: widget.onThemeModeChanged,
-      );
-    }
-    return LoginPage(
-      auth: auth,
-      onSignedIn: () => setState(() => signedIn = true),
-      onBack: () => widget.state.setDeviceRole(''),
-    );
-  }
-}
-
-class LoginPage extends StatefulWidget {
-  final AuthService auth;
-  final VoidCallback onSignedIn;
-  final Future<void> Function() onBack;
-  const LoginPage({super.key, required this.auth, required this.onSignedIn, required this.onBack});
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
-  final accountController = TextEditingController(text: AuthService.account);
-  final passwordController = TextEditingController();
-  bool loading = false;
-  String? error;
 
   @override
   void dispose() {
-    accountController.dispose();
-    passwordController.dispose();
+    _controller.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
-    final message = await widget.auth.signIn(
-      accountController.text,
-      passwordController.text,
-    );
+  Future<void> _loadPin() async {
+    if (widget.state.cloudSyncEnabled && widget.state.classId.trim().isNotEmpty) {
+      try {
+        final result = await widget.state.pullFromCloud();
+        if (result != null && result != '雲端還沒有這個班級的資料' && mounted) {
+          setState(() => _error = '讀取雲端 PIN 碼失敗：$result');
+          return;
+        }
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _error = '讀取雲端 PIN 碼失敗：$error');
+        return;
+      }
+    }
+    if (!mounted) return;
+    setState(() => _ready = true);
+  }
+
+  void _onPinChanged(String value) {
+    final pinLength = widget.state.bigScreenExitPinLength;
+    if (pinLength == null || value.length < pinLength) {
+      setState(() => _error = null);
+      return;
+    }
+    if (widget.state.verifyBigScreenExitPin(value)) {
+      final openSettings = _openSettingsAfterUnlock;
+      setState(() {
+        _error = null;
+        _unlocked = true;
+      });
+      if (openSettings) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          showSettingsWindowAfterPin(
+            context,
+            widget.state,
+          );
+        });
+      }
+    } else {
+      setState(() {
+        _error = 'PIN 碼錯誤，請重新輸入';
+        _controller.clear();
+      });
+    }
+  }
+
+  Future<void> _createPin() async {
+    final pin = _controller.text;
+    if (!RegExp(r'^\d{4,8}$').hasMatch(pin)) {
+      setState(() => _error = 'PIN 碼必須是 4 至 8 位數字');
+      return;
+    }
+    try {
+      await widget.state.setBigScreenExitPin(pin);
+    } catch (error) {
+      if (mounted) setState(() => _error = '儲存 PIN 碼失敗：$error');
+      return;
+    }
     if (!mounted) return;
     setState(() {
-      loading = false;
-      error = message;
+      _error = null;
+      _unlocked = true;
     });
-    if (message == null) widget.onSignedIn();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_ready) {
+      if (_error != null) {
+        return Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_error!),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () => setState(() {
+                    _error = null;
+                    _loadPin();
+                  }),
+                  child: const Text('重新載入'),
+                ),
+                TextButton(
+                  onPressed: () => widget.state.setDeviceRole(''),
+                  child: const Text('返回裝置選擇'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_unlocked) {
+      return MainShell(
+        state: widget.state,
+      );
+    }
+    final pinLength = widget.state.bigScreenExitPinLength;
+    final creating = pinLength == null;
+    final dotCount = pinLength ?? 8;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: SafeArea(
         child: Stack(
           children: [
-            Positioned(
-              top: 4,
-              left: 4,
-              child: IconButton(
-                tooltip: '返回裝置用途選擇',
-                onPressed: loading ? null : widget.onBack,
-                icon: const Icon(Icons.arrow_back),
+            AutoHideBar(
+              child: BigScreenTopBar(
+                icons: const [],
+                labels: const [],
+                current: 0,
+                onSelect: (_) {},
+                onBack: () => widget.state.setDeviceRole(''),
+                backTooltip: '返回裝置用途選擇',
+                onOpenSettings: creating ? null : () => setState(() => _openSettingsAfterUnlock = true),
               ),
             ),
             Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(32),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        '729 教師管理裝置',
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                        ),
+                      Text(
+                        creating ? '建立教師 PIN 碼' : '請輸入PIN碼',
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800),
                       ),
-                      const SizedBox(height: 24),
-                      TextField(
-                        controller: accountController,
-                        decoration: const InputDecoration(
-                          labelText: '帳號',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: passwordController,
-                        decoration: const InputDecoration(labelText: '密碼'),
-                        obscureText: true,
-                      ),
-                      if (error != null) ...[
+                      if (creating) ...[
                         const SizedBox(height: 12),
-                        Text(error!, style: const TextStyle(color: Colors.red)),
+                        const Text('設定 4 至 8 位數字，之後可用同一組 PIN 進入教師後台或退出大屏。'),
                       ],
-                      const SizedBox(height: 20),
-                      FilledButton(
-                        onPressed: loading ? null : _submit,
-                        child: Text(
-                          loading ? '登入中...' : '登入',
+                      SizedBox(height: creating ? 24 : 32),
+                      GestureDetector(
+                        onTap: _focusNode.requestFocus,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            for (var i = 0; i < dotCount; i++)
+                              Container(
+                                width: 18,
+                                height: 18,
+                                margin: const EdgeInsets.symmetric(horizontal: 4),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: i < _controller.text.length ? scheme.primary : Colors.transparent,
+                                  border: Border.all(color: scheme.outline, width: 1.5),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
+                      SizedBox(
+                        height: 2,
+                        child: Opacity(
+                          opacity: 0.01,
+                          child: TextField(
+                            controller: _controller,
+                            focusNode: _focusNode,
+                            autofocus: true,
+                            obscureText: true,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                            maxLength: creating ? 8 : pinLength,
+                            style: const TextStyle(fontSize: 1, color: Colors.transparent),
+                            cursorColor: Colors.transparent,
+                            decoration: const InputDecoration(
+                              border: InputBorder.none,
+                              counterText: '',
+                              contentPadding: EdgeInsets.zero,
+                              isCollapsed: true,
+                            ),
+                            onChanged: _onPinChanged,
+                          ),
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(_error!, style: TextStyle(color: scheme.error)),
+                      ],
+                      if (creating) ...[
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: _createPin,
+                          child: const Text('設定 PIN 並進入後台'),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -768,7 +896,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-/// Teacher-only tab (inside AdminPage) for classId + manual push/pull + sign out.
+/// Cloud synchronization controls retained for administrative integrations.
 class CloudDevicePage extends StatefulWidget {
   final AppState state;
   const CloudDevicePage({super.key, required this.state});
@@ -778,7 +906,6 @@ class CloudDevicePage extends StatefulWidget {
 }
 
 class _CloudDevicePageState extends State<CloudDevicePage> {
-  final auth = AuthService();
   late final TextEditingController classIdController;
   String? message;
   bool busy = false;
@@ -793,76 +920,6 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
   void dispose() {
     classIdController.dispose();
     super.dispose();
-  }
-
-  Future<void> _changePassword() async {
-    final currentController = TextEditingController();
-    final newController = TextEditingController();
-    final confirmController = TextEditingController();
-    String? error;
-    final changed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('更改登入密碼'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: currentController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: '目前密碼'),
-                ),
-                TextField(
-                  controller: newController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: '新密碼'),
-                ),
-                TextField(
-                  controller: confirmController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: '確認新密碼'),
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                if (newController.text != confirmController.text) {
-                  setDialogState(() => error = '兩次輸入的新密碼不一致');
-                  return;
-                }
-                final result = await auth.changePassword(
-                  currentController.text,
-                  newController.text,
-                );
-                if (result != null) {
-                  setDialogState(() => error = result);
-                  return;
-                }
-                if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-              },
-              child: const Text('儲存密碼'),
-            ),
-          ],
-        ),
-      ),
-    );
-    currentController.dispose();
-    newController.dispose();
-    confirmController.dispose();
-    if (changed == true && mounted) setState(() => message = '登入密碼已更新');
   }
 
   Future<void> _run(Future<String?> Function() action) async {
@@ -894,7 +951,7 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
           ),
           const SizedBox(height: 16),
           Text(
-            !auth.isConfigured
+            !kFirebaseConfigured
                 ? '雲端同步：尚未設定'
                 : !firebaseRuntimeReady
                     ? '雲端同步：Firebase 初始化失敗'
@@ -959,7 +1016,7 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
             runSpacing: 12,
             children: [
               FilledButton.icon(
-                onPressed: busy || !auth.isConfigured || !firebaseRuntimeReady
+                onPressed: busy || !kFirebaseConfigured || !firebaseRuntimeReady
                     ? null
                     : () => _run(() async {
                           final result = await widget.state.pushToCloud();
@@ -969,7 +1026,7 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
                 label: const Text('立即上傳到雲端'),
               ),
               OutlinedButton.icon(
-                onPressed: busy || !auth.isConfigured || !firebaseRuntimeReady
+                onPressed: busy || !kFirebaseConfigured || !firebaseRuntimeReady
                     ? null
                     : () => _run(() async {
                           final result = await widget.state.pullFromCloud();
@@ -977,11 +1034,6 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
                         }),
                 icon: const Icon(Icons.cloud_download_outlined),
                 label: const Text('從雲端下載並覆蓋本機'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _changePassword,
-                icon: const Icon(Icons.password_outlined),
-                label: const Text('更改登入密碼'),
               ),
             ],
           ),

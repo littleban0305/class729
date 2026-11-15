@@ -2,7 +2,7 @@ name: class_729
 
 description: 729 班級專用 Flutter 桌面軟體
 publish_to: 'none'
-version: 1.0.1+9
+version: 1.0.1+10
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

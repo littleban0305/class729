@@ -16,6 +16,8 @@ if exist "dist\729" rmdir /s /q "dist\729"
 mkdir "dist\729"
 xcopy /e /i /y /q "build\windows\x64\runner\Release\*" "dist\729\" >nul
 if exist "dist\729\729_error_log.txt" del "dist\729\729_error_log.txt"
+rem Never ship the local avatar folder: school PC keeps its own avatars and settings
+powershell -NoProfile -Command "$d = 'dist\729\' + [char]0x982D + [char]0x50CF; if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force }"
 if exist "%SystemRoot%\System32\msvcp140.dll" copy /y "%SystemRoot%\System32\msvcp140.dll" "dist\729\" >nul
 if exist "%SystemRoot%\System32\vcruntime140.dll" copy /y "%SystemRoot%\System32\vcruntime140.dll" "dist\729\" >nul
 if exist "%SystemRoot%\System32\vcruntime140_1.dll" copy /y "%SystemRoot%\System32\vcruntime140_1.dll" "dist\729\" >nul

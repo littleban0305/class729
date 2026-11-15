@@ -306,6 +306,8 @@ Future<void> main() async {
     _logError(error, stack);
   }
   runApp(SevenTwentyNineApp(state: state));
+  // 準備 exe 旁邊的「頭像」資料夾（第一次會自動建立並放入目前的頭像和設定）
+  unawaited(ExternalAvatars.init());
 }
 
 class MyApp extends StatelessWidget {
@@ -4813,22 +4815,32 @@ class _StudentCardState extends State<_StudentCard> with SingleTickerProviderSta
           ),
         );
         // 有頭像的同學：貼在卡片左上角，稍微超出卡片
-        // 位置和大小在 lib/ui_tweaks.dart 調整
-        final avatar = _avatarForSeat(seat.number);
-        if (avatar == null) return card;
-        final tweak = avatarTweaks[seat.number] ?? defaultAvatarTweak;
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            card,
-            Positioned(
-              left: tweak.left,
-              top: tweak.top,
-              width: tweak.width,
-              height: tweak.height,
-              child: IgnorePointer(child: Image.asset(avatar, fit: BoxFit.contain)),
-            ),
-          ],
+        // exe 旁邊「頭像」資料夾裡的圖片和「頭像設定.txt」優先；沒有才用打包在 app 裡的（lib/ui_tweaks.dart）
+        return ValueListenableBuilder<int>(
+          valueListenable: ExternalAvatars.version,
+          builder: (context, _, __) {
+            final file = ExternalAvatars.fileFor(seat.number);
+            final asset = file == null ? _avatarForSeat(seat.number) : null;
+            if (file == null && asset == null) return card;
+            final tweak = ExternalAvatars.tweakFor(seat.number);
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                card,
+                Positioned(
+                  left: tweak.left,
+                  top: tweak.top,
+                  width: tweak.width,
+                  height: tweak.height,
+                  child: IgnorePointer(
+                    child: file != null
+                        ? Image.file(file, fit: BoxFit.contain)
+                        : Image.asset(asset!, fit: BoxFit.contain),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -9125,6 +9137,11 @@ class BigScreenOtherMenu extends StatelessWidget {
           tile(Icons.how_to_vote_outlined, '投票', () => VotePage(state: state)),
           tile(Icons.public, 'Chrome', () => ChromePickerPage(state: state)),
           tile(Icons.gavel_rounded, '政策', null, onTap: () => showPolicyPaper(context, state)),
+          if (!kIsWeb && Platform.isWindows)
+            tile(Icons.face_retouching_natural, '重新載入頭像', null, onTap: () async {
+              final msg = await ExternalAvatars.reload();
+              if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+            }),
         ],
     );
   }
@@ -12137,6 +12154,131 @@ class _PolicyAdminPageState extends State<PolicyAdminPage> {
         ],
       ),
     );
+  }
+}
+
+// ───────────────────────── 外部頭像資料夾（exe 旁邊的「頭像」） ─────────────────────────
+
+/// exe 旁邊的「頭像」資料夾：
+///   1.png、2.png…（檔名 = 座號）丟進去就會顯示；
+///   「頭像設定.txt」每行「座號 = 左, 上, 寬, 高」，隨時用記事本改，改完按「其他 → 重新載入頭像」。
+/// 自動更新只會蓋 app 本身，不會動這個資料夾。
+class ExternalAvatars {
+  static const folderName = '頭像';
+  static const settingsName = '頭像設定.txt';
+  static final version = ValueNotifier<int>(0);
+  static final Map<String, File> _files = {};
+  static final Map<String, AvatarTweak> _tweaks = {};
+  static AvatarTweak? _default;
+  static bool _hasSettings = false;
+
+  static Directory? get _dir {
+    if (kIsWeb || !Platform.isWindows) return null;
+    return Directory('${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}$folderName');
+  }
+
+  static File? fileFor(String seat) => _files[seat];
+
+  /// 有「頭像設定.txt」就完全照它（沒寫到的座號用它的「預設」）；沒有才用 lib/ui_tweaks.dart
+  static AvatarTweak tweakFor(String seat) => _hasSettings
+      ? (_tweaks[seat] ?? _default ?? defaultAvatarTweak)
+      : (avatarTweaks[seat] ?? defaultAvatarTweak);
+
+  static String _fmt(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+  static String _line(String key, AvatarTweak t) =>
+      '$key = ${_fmt(t.left)}, ${_fmt(t.top)}, ${_fmt(t.width)}, ${_fmt(t.height)}';
+
+  /// 第一次：建立資料夾，放入打包在 app 裡的頭像和目前的設定
+  static Future<void> init() async {
+    final dir = _dir;
+    if (dir == null) return;
+    try {
+      if (!dir.existsSync()) dir.createSync(recursive: true);
+      // 每次打開：app 裡有、資料夾裡還沒有的圖片檔就放進去（去背的 png 和原圖 jpg 都會放；
+      // 同一個座號兩個都有時顯示 png，去背不好看就把那張 png 刪掉，改用原圖）。已經在資料夾裡的不會被蓋掉
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      for (final asset in manifest.listAssets().where((a) => a.startsWith('assets/avatars/'))) {
+        final name = asset.split('/').last;
+        final target = File('${dir.path}${Platform.pathSeparator}$name');
+        if (target.existsSync()) continue;
+        final data = await rootBundle.load(asset);
+        target.writeAsBytesSync(data.buffer.asUint8List());
+      }
+      final settings = File('${dir.path}${Platform.pathSeparator}$settingsName');
+      if (settings.existsSync()) {
+        // 設定檔裡還沒有的座號，用 app 裡的數字補在最後面（已經寫的不會動）
+        final text = settings.readAsStringSync();
+        final have = RegExp(r'^\s*(\S+?)\s*[=＝]', multiLine: true).allMatches(text).map((m) => m.group(1)).toSet();
+        final missing = [for (final e in avatarTweaks.entries) if (!have.contains(e.key)) _line(e.key, e.value)];
+        if (missing.isNotEmpty) {
+          settings.writeAsStringSync('${text.endsWith('\n') ? '' : '\r\n'}${missing.join('\r\n')}\r\n',
+              mode: FileMode.append);
+        }
+      } else {
+        final lines = [
+          '# 頭像設定：每行「座號 = 左, 上, 寬, 高」',
+          '# 左：負越多越往左；上：負越多越往上；寬、高：圖片大小',
+          '# 圖片放在同一個資料夾，檔名就是座號（例如 7.png）',
+          '# 改完存檔，到大屏「其他 → 重新載入頭像」就會更新',
+          '',
+          _line('預設', defaultAvatarTweak),
+          for (final e in avatarTweaks.entries) _line(e.key, e.value),
+        ];
+        // 加 BOM，記事本打開中文不會亂碼
+        settings.writeAsStringSync('﻿${lines.join('\r\n')}\r\n');
+      }
+    } catch (_) {}
+    await reload();
+  }
+
+  /// 重新讀資料夾裡的圖片和設定
+  static Future<String> reload() async {
+    final dir = _dir;
+    if (dir == null) return '只有 Windows 版支援頭像資料夾';
+    try {
+      if (!dir.existsSync()) return '找不到「$folderName」資料夾';
+      _files.clear();
+      _tweaks.clear();
+      _default = null;
+      for (final f in dir.listSync().whereType<File>()) {
+        final name = f.uri.pathSegments.last;
+        final m = RegExp(r'^(\d+)\.(png|jpe?g|webp|gif)$', caseSensitive: false).firstMatch(name);
+        // 同一個座號有 png 也有 jpg 時，用 png（去背過的）
+        if (m != null && !(_files[m.group(1)!]?.path.toLowerCase().endsWith('.png') ?? false)) _files[m.group(1)!] = f;
+      }
+      final settings = File('${dir.path}${Platform.pathSeparator}$settingsName');
+      var bad = 0;
+      _hasSettings = settings.existsSync();
+      if (_hasSettings) {
+        for (var line in settings.readAsLinesSync()) {
+          line = line.replaceAll('﻿', '').trim();
+          if (line.isEmpty || line.startsWith('#')) continue;
+          final parts = line.split(RegExp(r'[=＝]'));
+          if (parts.length != 2) {
+            bad++;
+            continue;
+          }
+          final nums = parts[1].split(RegExp(r'[,，\s]+')).where((e) => e.isNotEmpty).map(double.tryParse).toList();
+          if (nums.length != 4 || nums.contains(null)) {
+            bad++;
+            continue;
+          }
+          final t = AvatarTweak(left: nums[0]!, top: nums[1]!, width: nums[2]!, height: nums[3]!);
+          final key = parts[0].trim();
+          if (key == '預設') {
+            _default = t;
+          } else {
+            _tweaks[key] = t;
+          }
+        }
+      }
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      version.value++;
+      return '已重新載入 ${_files.length} 張頭像${bad > 0 ? '（設定檔有 $bad 行看不懂，已略過）' : ''}';
+    } catch (e) {
+      return '重新載入失敗：$e';
+    }
   }
 }
 

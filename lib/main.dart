@@ -308,6 +308,19 @@ Future<void> main() async {
   runApp(SevenTwentyNineApp(state: state));
   // 準備 exe 旁邊的「頭像」資料夾（第一次會自動建立並放入目前的頭像和設定）
   unawaited(ExternalAvatars.init());
+  // 按 F5：重新讀「頭像」資料夾的圖片和「頭像設定.txt」，改完位置馬上看效果
+  HardwareKeyboard.instance.addHandler((event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.f5) {
+      ExternalAvatars.reload().then((msg) {
+        windowsUpdateStatus.value = msg;
+        Future<void>.delayed(const Duration(seconds: 2), () {
+          if (windowsUpdateStatus.value == msg) windowsUpdateStatus.value = null;
+        });
+      });
+      return true;
+    }
+    return false;
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -9137,11 +9150,6 @@ class BigScreenOtherMenu extends StatelessWidget {
           tile(Icons.how_to_vote_outlined, '投票', () => VotePage(state: state)),
           tile(Icons.public, 'Chrome', () => ChromePickerPage(state: state)),
           tile(Icons.gavel_rounded, '政策', null, onTap: () => showPolicyPaper(context, state)),
-          if (!kIsWeb && Platform.isWindows)
-            tile(Icons.face_retouching_natural, '重新載入頭像', null, onTap: () async {
-              final msg = await ExternalAvatars.reload();
-              if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-            }),
         ],
     );
   }
@@ -12161,7 +12169,7 @@ class _PolicyAdminPageState extends State<PolicyAdminPage> {
 
 /// exe 旁邊的「頭像」資料夾：
 ///   1.png、2.png…（檔名 = 座號）丟進去就會顯示；
-///   「頭像設定.txt」每行「座號 = 左, 上, 寬, 高」，隨時用記事本改，改完按「其他 → 重新載入頭像」。
+///   「頭像設定.txt」每行「座號 = 左, 上, 寬, 高」，隨時用記事本改，改完在 app 按 F5。
 /// 自動更新只會蓋 app 本身，不會動這個資料夾。
 class ExternalAvatars {
   static const folderName = '頭像';
@@ -12219,7 +12227,7 @@ class ExternalAvatars {
           '# 頭像設定：每行「座號 = 左, 上, 寬, 高」',
           '# 左：負越多越往左；上：負越多越往上；寬、高：圖片大小',
           '# 圖片放在同一個資料夾，檔名就是座號（例如 7.png）',
-          '# 改完存檔，到大屏「其他 → 重新載入頭像」就會更新',
+          '# 改完存檔，回到 app 按 F5 就會更新',
           '',
           _line('預設', defaultAvatarTweak),
           for (final e in avatarTweaks.entries) _line(e.key, e.value),

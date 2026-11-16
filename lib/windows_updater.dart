@@ -84,21 +84,52 @@ Future<String> checkWindowsUpdate({bool manual = false}) async {
     await Future<void>.delayed(const Duration(seconds: 2));
     final exe = Platform.resolvedExecutable;
     final appDir = File(exe).parent.path;
-    final bat = File('${tmp.path}\\update.bat');
-    await bat.writeAsString([
-      '@echo off',
-      'chcp 65001 >nul',
-      ':wait',
-      'tasklist /FI "PID eq $pid" 2>nul | find "$pid" >nul',
-      'if not errorlevel 1 (',
-      '  timeout /t 1 /nobreak >nul',
-      '  goto wait',
-      ')',
-      'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath \'${zip.path}\' -DestinationPath \'$appDir\' -Force"',
-      'start "" "$exe"',
-      '',
-    ].join('\r\n'));
-    await Process.start('cmd', ['/c', bat.path], mode: ProcessStartMode.detached, runInShell: false);
+    // 用 PowerShell 腳本更新（比 bat 穩：中文路徑不會亂碼、解壓縮快、全程寫紀錄）
+    // 紀錄檔：app 資料夾裡的 729_update_log.txt，更新卡住時看它就知道停在哪一步
+    final log = '$appDir\\729_update_log.txt';
+    String q(String s) => s.replaceAll("'", "''");
+    final ps1 = File('${tmp.path}\\update.ps1');
+    final script = [
+      r"$ErrorActionPreference = 'Stop'",
+      "\$log = '${q(log)}'",
+      r"function Log($m) { Add-Content -LiteralPath $log -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '  ' + $m) -Encoding UTF8 }",
+      "try {",
+      "  Log '開始更新到 $tag'",
+      // 等舊的 app 關掉（最多 30 秒）
+      "  try { Wait-Process -Id $pid -Timeout 30 -ErrorAction SilentlyContinue } catch {}",
+      "  Start-Sleep -Milliseconds 800",
+      "  Log '舊版已關閉，開始解壓縮'",
+      r"  Add-Type -AssemblyName System.IO.Compression",
+      r"  Add-Type -AssemblyName System.IO.Compression.FileSystem",
+      "  \$zip = [System.IO.Compression.ZipFile]::OpenRead('${q(zip.path)}')",
+      "  \$dest = '${q(appDir)}'",
+      r"  $n = 0",
+      r"  foreach ($e in $zip.Entries) {",
+      r"    $rel = $e.FullName -replace '/', '\'",
+      r"    if ($rel.EndsWith('\')) { continue }",
+      r"    $target = Join-Path $dest $rel",
+      r"    $dir = Split-Path $target -Parent",
+      r"    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }",
+      // 檔案被占用時重試幾次
+      r"    for ($i = 0; $i -lt 10; $i++) { try { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $target, $true); break } catch { if ($i -eq 9) { throw }; Start-Sleep -Milliseconds 500 } }",
+      r"    $n++",
+      r"  }",
+      r"  $zip.Dispose()",
+      "  Log (\"解壓縮完成，共 \" + \$n + \" 個檔案\")",
+      "  Start-Process -FilePath '${q(exe)}' -WorkingDirectory '${q(appDir)}'",
+      "  Log '已重新打開 app'",
+      "} catch {",
+      r"  Log ('更新失敗：' + $_.Exception.Message)",
+      "  Start-Process -FilePath '${q(exe)}' -WorkingDirectory '${q(appDir)}'",
+      "}",
+    ].join('\r\n');
+    // 加 BOM，PowerShell 才會用 UTF-8 讀中文
+    await ps1.writeAsString('﻿$script\r\n');
+    await Process.start(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ps1.path],
+      mode: ProcessStartMode.detached,
+    );
     exit(0);
   } catch (e) {
     windowsUpdateStatus.value = null;

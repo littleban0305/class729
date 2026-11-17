@@ -363,6 +363,11 @@ class AppState extends ChangeNotifier {
     _publicCloudSubscription = cloud.watchPublicState(id).listen(
       (data) {
         if (data == null) return;
+        if (_hasUnsyncedChanges) {
+          // 自己的修改還在同步：先記著，同步完再套用最新的這份
+          _skippedPublicData = data;
+          return;
+        }
         if (_seatMutationPending || (_ignorePublicCloudUntil?.isAfter(DateTime.now()) ?? false)) return;
         cloudSyncError = null;
         lastCloudSyncAt = DateTime.now();
@@ -384,16 +389,24 @@ class AppState extends ChangeNotifier {
     final raw = data['seats'];
     if (raw is! List) return;
     final scores = <String, int>{};
+    final chinese = <String, int>{};
     for (final e in raw.whereType<Map>()) {
       final number = '${e['number'] ?? ''}';
       final score = e['score'];
       if (number.isNotEmpty && score is num) scores[number] = score.toInt();
+      final c = e['chineseScore'];
+      if (number.isNotEmpty && c is num) chinese[number] = c.toInt();
     }
     var changed = false;
     for (final seat in seats) {
       final s = scores[seat.number];
       if (s != null && s != seat.score) {
         seat.score = s;
+        changed = true;
+      }
+      final c = chinese[seat.number];
+      if (c != null && c != seat.chineseScore) {
+        seat.chineseScore = c;
         changed = true;
       }
     }
@@ -419,6 +432,10 @@ class AppState extends ChangeNotifier {
     _teacherCloudSubscription = cloud.watchState(id).listen(
       (data) {
         if (data == null) return;
+        if (_hasUnsyncedChanges) {
+          _skippedTeacherData = data;
+          return;
+        }
         if (_seatMutationPending) return;
         cloudSyncError = null;
         lastCloudSyncAt = DateTime.now();
@@ -466,7 +483,72 @@ class AppState extends ChangeNotifier {
     super.dispose();
   }
 
-  Future<void> _save({bool syncCloud = true}) async {
+  // ── 先預覽再同步 ──
+  // _save() 會先通知畫面更新，存檔和推上雲端改在背景做（多次修改會合併成一次），
+  // 所以按下蓋章等按鈕時畫面馬上變，不用等網路。
+  Timer? _saveTimer;
+  bool _localDirty = false;
+  bool _cloudDirty = false;
+  Future<void>? _saveRun;
+  Map<String, dynamic>? _skippedPublicData;
+  Map<String, dynamic>? _skippedTeacherData;
+
+  /// 還有修改沒存完／沒推上雲端：這段時間不要被雲端的舊資料蓋回去
+  bool get _hasUnsyncedChanges => _localDirty || _saveRun != null || (_saveTimer?.isActive ?? false);
+
+  Future<void> _save({bool syncCloud = true}) {
+    _localDirty = true;
+    if (syncCloud) _cloudDirty = true;
+    notifyListeners();
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 150), () => unawaited(flushSave()));
+    return Future<void>.value();
+  }
+
+  /// 立刻把還沒存的修改存完（關閉 App、更新前可以呼叫）
+  Future<void> flushSave() {
+    _saveTimer?.cancel();
+    return _saveRun ??= _runSaveLoop().whenComplete(() {
+      _saveRun = null;
+      _replaySkippedCloudData();
+    });
+  }
+
+  /// 同步期間收到但先跳過的雲端資料，同步完後再套用（裡面已包含自己剛推上去的修改）
+  void _replaySkippedCloudData() {
+    if (_hasUnsyncedChanges) return;
+    final pub = _skippedPublicData;
+    final teacher = _skippedTeacherData;
+    _skippedPublicData = null;
+    _skippedTeacherData = null;
+    if (teacher != null && deviceRole == 'teacher') {
+      _applyImportedData(teacher, preserveTestNow: true);
+      notifyListeners();
+    }
+    if (pub != null) {
+      if (deviceRole == 'teacher') {
+        unawaited(_applyPublicSeatScores(pub));
+      } else if (deviceRole == 'bigscreen') {
+        unawaited(applyPublicCloudData(pub));
+      }
+    }
+  }
+
+  Future<void> _runSaveLoop() async {
+    while (_localDirty) {
+      _localDirty = false;
+      final pushCloud = _cloudDirty;
+      _cloudDirty = false;
+      try {
+        await _writeLocalAndCloud(syncCloud: pushCloud);
+      } catch (error) {
+        cloudSyncError = error.toString();
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> _writeLocalAndCloud({required bool syncCloud}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_remindersKey, jsonEncode(reminders.map((e) => e.toJson()).toList()));
     await prefs.setString(_seatsKey, jsonEncode(seats.map((e) => e.toJson()).toList()));
@@ -1194,6 +1276,56 @@ class AppState extends ChangeNotifier {
   }
 
   /// 現在所在的特殊顯示時段；[overrideOnly] 為 true 時只找「蓋過上課」的時段
+  // ── 國文課分組競賽 ──
+
+  /// 現在（大屏時間，測試時間也算）是不是國文課
+  bool get isChineseLessonNow {
+    final now = reminderNow;
+    final m = now.hour * 60 + now.minute;
+    int hm(String v) {
+      final p = v.split(':');
+      if (p.length < 2) return -1;
+      return (int.tryParse(p[0].trim()) ?? -1) * 60 + (int.tryParse(p[1].trim()) ?? 0);
+    }
+    for (final e in scheduleEntries.where((e) => e.weekday == now.weekday - 1)) {
+      final s = hm(e.startTime), en = hm(e.endTime);
+      if (s >= 0 && en >= 0 && m >= s && m < en) return e.subject.contains('國文');
+    }
+    return false;
+  }
+
+  /// 小組分數 = 這組所有同學加減分的總和（每位同學的 chineseScore 只是記錄這組被加減了幾分）
+  int chineseGroupScore(int group) {
+    if (group <= 0) return 0;
+    var total = 0;
+    for (final s in seats) {
+      if (s.group == group) total += s.chineseScore;
+    }
+    return total;
+  }
+
+  /// 國文小組分數一次加減一分（不用 PIN）
+  Future<void> adjustChineseScore(int index, int delta) async {
+    if (index < 0 || index >= seats.length) return;
+    seats[index].chineseScore += delta;
+    _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
+    await _save();
+  }
+
+  Future<void> setSeatGroup(int index, int group) async {
+    if (index < 0 || index >= seats.length) return;
+    seats[index].group = group;
+    await _save();
+  }
+
+  Future<void> resetChineseScores() async {
+    for (final s in seats) {
+      s.chineseScore = 0;
+    }
+    _ignorePublicCloudUntil = DateTime.now().add(const Duration(seconds: 5));
+    await _save();
+  }
+
   TimePeriod? periodAt(DateTime time, {bool overrideOnly = false}) {
     final minutes = time.hour * 60 + time.minute;
     for (final p in timePeriods) {

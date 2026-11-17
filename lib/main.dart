@@ -444,8 +444,8 @@ Future<bool> showPinEntryDialog(BuildContext context, AppState state) async {
 
 /// 管理者 PIN 碼：進入大屏蓋章頁前輸入。還沒設定幹部 PIN 碼時直接通過。
 Future<bool> showOfficerPinDialog(BuildContext context, AppState state) async {
-  // 網頁版不會放在大屏上，不用 PIN 碼
-  if (kIsWeb) return true;
+  // 網頁版不會放在大屏上、教師後台的大屏預覽，都不用 PIN 碼
+  if (kIsWeb || BigScreenPreviewScope.isPreview(context)) return true;
   final pinLength = state.officerPinLength;
   if (pinLength == null || pinLength < 4 || pinLength > 8) return true;
   return await showDialog<bool>(
@@ -4638,6 +4638,13 @@ class _StudentCardState extends State<_StudentCard> with SingleTickerProviderSta
     super.dispose();
   }
 
+  /// 小組分數加減一分：畫面先變（蓋章動畫），背景再同步
+  void _changeChinese(int delta) {
+    setState(() => _lastDelta = delta);
+    _anim.forward(from: 0);
+    unawaited(widget.state.adjustChineseScore(widget.index, delta));
+  }
+
   /// 章數小卡：上面小字、下面大數字，置中；結算章用淡黃底當主角
   Widget _stampFigure(ColorScheme scheme, String label, int value, {bool primary = false}) => Container(
         height: 104,
@@ -4676,6 +4683,7 @@ class _StudentCardState extends State<_StudentCard> with SingleTickerProviderSta
         final roles = seat.label.split(RegExp(r'[、,，/\s]+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
         final hasName = seat.name.trim().isNotEmpty;
         final hairline = BorderSide(color: scheme.outline, width: AppTokens.hairline);
+        final chinese = state.isChineseLessonNow;
 
         Widget section(String title, Widget child) => Padding(
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 18),
@@ -4804,6 +4812,63 @@ class _StudentCardState extends State<_StudentCard> with SingleTickerProviderSta
                     ),
                   ),
                   const SizedBox(height: 20),
+                  // 國文課：顯示國文分數和加減分按鈕（不用 PIN），取代章數
+                  if (chinese) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                      child: AnimatedBuilder(
+                        animation: _anim,
+                        builder: (_, child) {
+                          final v = _anim.value;
+                          final bump =
+                              v < 0.3 ? 1 + (v / 0.3) * 0.18 : 1.18 - ((v - 0.3) / 0.7).clamp(0.0, 1.0) * 0.18;
+                          final shake = _lastDelta < 0 && v < 0.5 ? sin(v * 40) * 6 * (1 - v * 2) : 0.0;
+                          return Transform.translate(
+                            offset: Offset(shake, 0),
+                            child: Transform.scale(scale: _lastDelta > 0 ? bump : 1, child: child),
+                          );
+                        },
+                        child: seat.group > 0
+                            ? _stampFigure(scheme, '第 ${seat.group} 組・小組分數', state.chineseGroupScore(seat.group),
+                                primary: true)
+                            : Container(
+                                height: 104,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: scheme.surfaceContainerLow,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: scheme.outlineVariant, width: AppTokens.hairline),
+                                ),
+                                child: Text('還沒分組，請老師在教師後台設定',
+                                    style: TextStyle(fontSize: 16, color: scheme.onSurfaceVariant)),
+                              ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                              onPressed: hasName && seat.group > 0 ? () => _changeChinese(-1) : null,
+                              icon: const Icon(Icons.remove),
+                              label: const Text('扣 1 分', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+                              onPressed: hasName && seat.group > 0 ? () => _changeChinese(1) : null,
+                              icon: const Icon(Icons.add),
+                              label: const Text('加 1 分', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else
                   // 2. 章數＋3. 蓋章動畫
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
@@ -5885,6 +5950,7 @@ class AdminPage extends StatelessWidget {
             ('時間', () => TimeManagementPage(state: state)),
             ('聯絡簿', () => DiaryAdminPage(state: state)),
             ('評分', () => RatingRecordsPage(state: state)),
+            ('國文分組', () => ChineseGroupAdminPage(state: state)),
           ],
         ),
       4 => AdminSection(
@@ -5902,7 +5968,10 @@ class AdminPage extends StatelessWidget {
           key: const ValueKey('test'),
           title: '測試',
           tint: const Color(0xFFF4F0FF),
-          tabs: [('提醒測試', () => _ReminderTestPage(state: state))],
+          tabs: [
+            ('提醒測試', () => _ReminderTestPage(state: state)),
+            ('大屏預覽', () => _BigScreenPreviewLauncher(state: state)),
+          ],
         ),
       _ => AdminSection(
           key: const ValueKey('overview'),
@@ -6086,86 +6155,89 @@ class _AppInfoSettingsPageState extends State<_AppInfoSettingsPage> {
             ),
           ),
         ),
-        const SizedBox(height: 18),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('教師與大屏共用 PIN 碼', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                Text(
-                  widget.state.bigScreenExitPinLength == null
-                      ? '尚未設定'
-                      : '已設定 ${widget.state.bigScreenExitPinLength} 位數 PIN 碼',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _bigScreenPinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  maxLength: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'PIN 碼',
-                    border: OutlineInputBorder(),
-                    counterText: '',
+        // 網頁版不用 PIN 碼，所以不顯示 PIN 碼設定（到電腦版設定）
+        if (!kIsWeb) ...[
+          const SizedBox(height: 18),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('教師與大屏共用 PIN 碼', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.state.bigScreenExitPinLength == null
+                        ? '尚未設定'
+                        : '已設定 ${widget.state.bigScreenExitPinLength} 位數 PIN 碼',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: _saveBigScreenExitPin,
-                    icon: const Icon(Icons.lock_outline),
-                    label: const Text('儲存 PIN 碼'),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _bigScreenPinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    maxLength: 8,
+                    decoration: const InputDecoration(
+                      labelText: 'PIN 碼',
+                      border: OutlineInputBorder(),
+                      counterText: '',
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed: _saveBigScreenExitPin,
+                      icon: const Icon(Icons.lock_outline),
+                      label: const Text('儲存 PIN 碼'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 18),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('管理者 PIN 碼', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 8),
-                Text(
-                  widget.state.officerPinLength == null ? '尚未設定' : '已設定 ${widget.state.officerPinLength} 位數 PIN 碼',
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _officerPinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  maxLength: 8,
-                  decoration: const InputDecoration(
-                    labelText: '管理者 PIN 碼',
-                    border: OutlineInputBorder(),
-                    counterText: '',
+          const SizedBox(height: 18),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('管理者 PIN 碼', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.state.officerPinLength == null ? '尚未設定' : '已設定 ${widget.state.officerPinLength} 位數 PIN 碼',
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: _saveOfficerPin,
-                    icon: const Icon(Icons.badge_outlined),
-                    label: const Text('儲存管理者 PIN 碼'),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _officerPinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    maxLength: 8,
+                    decoration: const InputDecoration(
+                      labelText: '管理者 PIN 碼',
+                      border: OutlineInputBorder(),
+                      counterText: '',
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed: _saveOfficerPin,
+                      icon: const Icon(Icons.badge_outlined),
+                      label: const Text('儲存管理者 PIN 碼'),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+        ],
         const SizedBox(height: 18),
         Card(
           child: Padding(
@@ -6696,8 +6768,8 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
       case 'pick':
         _startPick();
       default:
-        // 最小化，露出藏在後面的電子書和 Chrome
-        if (isDesktopPlatform) windowManager.minimize();
+        // 最小化，露出藏在後面的電子書和 Chrome（教師後台預覽時不縮小）
+        if (isDesktopPlatform && !BigScreenPreviewScope.isPreview(context)) windowManager.minimize();
     }
   }
 
@@ -6805,6 +6877,10 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
       ),
     );
 
+    // 國文課：黃色按鈕下面顯示小組排行榜
+    final showBoard = widget.state.isChineseLessonNow && widget.state.seats.any((s) => s.group > 0);
+    final board = showBoard ? ChineseLeaderboard(state: widget.state) : const SizedBox.shrink();
+
     Widget roundButton(Object icon, String label, Widget Function()? page, {VoidCallback? onTap}) => Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -6855,6 +6931,7 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
                 lesson,
                 const SizedBox(height: 20),
                 Center(child: startButton),
+                if (showBoard) ...[const SizedBox(height: 20), FittedBox(fit: BoxFit.scaleDown, child: board)],
                 const SizedBox(height: 24),
                 SizedBox(height: 520, child: seats),
                 const SizedBox(height: 24),
@@ -6875,15 +6952,17 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
                     fit: BoxFit.scaleDown,
                     child: SizedBox(
                       width: 760,
-                      height: 1000,
+                      // 有排行榜時版面變高，FittedBox 會自動縮小放得下
+                      height: showBoard ? 1000 + ChineseLeaderboard.heightFor(widget.state) : 1000,
                       child: Column(
                         children: [
                           const Spacer(flex: 3),
                           clock,
-                          const SizedBox(height: 56),
+                          SizedBox(height: showBoard ? 32 : 56),
                           lesson,
-                          const SizedBox(height: 72),
+                          SizedBox(height: showBoard ? 40 : 72),
                           startButton,
+                          if (showBoard) ...[const SizedBox(height: 28), board],
                           const Spacer(flex: 2),
                           shortcuts,
                           const SizedBox(height: 90),
@@ -6922,6 +7001,15 @@ class BigScreenSeatGrid extends StatelessWidget {
       return null;
     }
 
+    // 每 15 秒重畫一次，國文課開始／結束時組別標籤會自己出現／消失
+    return StreamBuilder<void>(
+      stream: _lessonTick,
+      builder: (context, _) => _buildGrid(context, scheme, isDark, seats, cols, rows, indexAt),
+    );
+  }
+
+  Widget _buildGrid(BuildContext context, ColorScheme scheme, bool isDark, List<SeatData> seats, int cols, int rows,
+      int? Function(int, int) indexAt) {
     return Column(
       children: [
         Expanded(
@@ -7037,8 +7125,144 @@ class BigScreenSeatGrid extends StatelessWidget {
         ),
       ),
     );
+    // 國文課：左上角顯示第幾組
+    if (seat.group > 0 && state.isChineseLessonNow) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            cell,
+            Positioned(
+              left: -6,
+              top: -6,
+              child: IgnorePointer(child: ChineseGroupBadge(group: seat.group, fontSize: (size * 0.13).clamp(11.0, 22.0))),
+            ),
+          ],
+        ),
+      );
+    }
     // 頭像暫時只放在詳細資料卡片，座位格不顯示
     return cell;
+  }
+}
+
+/// 大屏座位格用的計時：讓國文課標籤跟著上下課更新
+final Stream<void> _lessonTick = Stream<void>.periodic(const Duration(seconds: 15)).asBroadcastStream();
+
+/// 國文分組的顏色（第 1～8 組，超過就循環）
+const chineseGroupColors = [
+  Color(0xFFFFD803),
+  Color(0xFFBAE8E8),
+  Color(0xFFFFB4C6),
+  Color(0xFFC3F0A8),
+  Color(0xFFD6C8FF),
+  Color(0xFFFFCC99),
+  Color(0xFFA8D8FF),
+  Color(0xFFE8E8E8),
+];
+
+/// 國文課小組排行榜（大屏首頁黃色按鈕下面）
+class ChineseLeaderboard extends StatelessWidget {
+  final AppState state;
+  const ChineseLeaderboard({super.key, required this.state});
+
+  static const _rowHeight = 56.0;
+  static const _headerHeight = 52.0;
+
+  /// 有人的組別，依分數高到低（同分照組別）
+  static List<(int, int)> ranking(AppState state) {
+    final groups = {for (final s in state.seats) if (s.group > 0 && s.name.trim().isNotEmpty) s.group}.toList();
+    final list = [for (final g in groups) (g, state.chineseGroupScore(g))];
+    list.sort((a, b) => b.$2 != a.$2 ? b.$2.compareTo(a.$2) : a.$1.compareTo(b.$1));
+    return list;
+  }
+
+  static double heightFor(AppState state) => _headerHeight + ranking(state).length * (_rowHeight + 6) + 40;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final list = ranking(state);
+    // 同分同名次
+    final ranks = <int>[];
+    for (var i = 0; i < list.length; i++) {
+      ranks.add(i > 0 && list[i].$2 == list[i - 1].$2 ? ranks[i - 1] : i + 1);
+    }
+    const medal = {1: Color(0xFFFFD803), 2: Color(0xFFD9DEE6), 3: Color(0xFFF0B989)};
+    return Container(
+      width: 560,
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: scheme.outline, width: AppTokens.hairline),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: _headerHeight - 14,
+            child: Text('國文小組排行榜',
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: scheme.onSurface)),
+          ),
+          for (var i = 0; i < list.length; i++)
+            Container(
+              height: _rowHeight,
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: ranks[i] == 1 ? scheme.primaryContainer : scheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: medal[ranks[i]] ?? Colors.transparent,
+                      shape: BoxShape.circle,
+                      border: medal.containsKey(ranks[i]) ? Border.all(color: AppTokens.ink, width: 1.5) : null,
+                    ),
+                    child: Text('${ranks[i]}',
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: AppTokens.ink)),
+                  ),
+                  const SizedBox(width: 14),
+                  ChineseGroupBadge(group: list[i].$1, fontSize: 20),
+                  const Spacer(),
+                  Text('${list[i].$2}',
+                      style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: scheme.onSurface)),
+                  Text(' 分', style: TextStyle(fontSize: 18, color: scheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 「第 N 組」小標籤
+class ChineseGroupBadge extends StatelessWidget {
+  final int group;
+  final double fontSize;
+  const ChineseGroupBadge({super.key, required this.group, this.fontSize = 14});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: fontSize * 0.6, vertical: fontSize * 0.2),
+      decoration: BoxDecoration(
+        color: chineseGroupColors[(group - 1) % chineseGroupColors.length],
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppTokens.ink, width: 1.5),
+      ),
+      child: Text('第 $group 組',
+          style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w900, color: AppTokens.ink, height: 1.2)),
+    );
   }
 }
 
@@ -9479,6 +9703,199 @@ class _RewardRedeemPageState extends State<RewardRedeemPage> {
               ),
             ],
           ),
+        );
+      },
+    );
+  }
+}
+
+// ───────────────────────── 教師後台：大屏預覽 ─────────────────────────
+
+/// 標記「現在是教師後台裡的大屏預覽」：不用 PIN、不縮小視窗
+class BigScreenPreviewScope extends InheritedWidget {
+  final bool preview;
+  const BigScreenPreviewScope({super.key, required this.preview, required super.child});
+
+  static bool isPreview(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<BigScreenPreviewScope>()?.preview ?? false;
+
+  @override
+  bool updateShouldNotify(BigScreenPreviewScope oldWidget) => oldWidget.preview != preview;
+}
+
+/// 測試 → 大屏預覽：在教師後台打開完整的大屏畫面
+class _BigScreenPreviewLauncher extends StatelessWidget {
+  final AppState state;
+  const _BigScreenPreviewLauncher({required this.state});
+
+  void _open(BuildContext context) {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(builder: (_) => BigScreenDeviceShell(state: state, preview: true)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: _pagePad(context),
+      children: [
+        const Text('大屏預覽', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 8),
+        Text(
+          '打開跟大屏一模一樣的畫面，可以測試簽到、蓋章、選號、懲罰抽籤、兌換、聯絡簿、國文分組等所有大屏功能。\n'
+          '・不用輸入 PIN 碼，左上角返回鍵回到教師後台\n'
+          '・不會縮小視窗、不會自動開教材資料夾\n'
+          '・在預覽裡做的事（蓋章、簽到、分數）都是真的資料，會同步到大屏\n'
+          '・想測國文課，可以在「提醒測試」把時間調到國文課',
+          style: TextStyle(fontSize: 15, height: 1.6, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: () => _open(context),
+            icon: const Icon(Icons.tv_outlined),
+            label: const Text('開啟大屏預覽'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ───────────────────────── 教師後台：國文分組競賽 ─────────────────────────
+
+/// 設定每位同學是第幾組、看國文分數和各組總分
+class ChineseGroupAdminPage extends StatelessWidget {
+  final AppState state;
+  const ChineseGroupAdminPage({super.key, required this.state});
+
+  static const maxGroups = 8;
+
+  Future<void> _reset(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('小組分數全部歸零？'),
+        content: const Text('所有小組的分數都會變回 0，組別不會改。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('歸零')),
+        ],
+      ),
+    );
+    if (ok == true) await state.resetChineseScores();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: state,
+      builder: (context, _) {
+        final scheme = Theme.of(context).colorScheme;
+        int seatNo(int i) => int.tryParse(state.seats[i].number.replaceAll(RegExp(r'[^0-9]'), '')) ?? 9999;
+        final indexes = [
+          for (var i = 0; i < state.seats.length; i++)
+            if (state.seats[i].name.trim().isNotEmpty) i,
+        ]..sort((a, b) => seatNo(a).compareTo(seatNo(b)));
+        // 各組分數
+        final totals = <int, int>{};
+        final counts = <int, int>{};
+        for (final i in indexes) {
+          final g = state.seats[i].group;
+          if (g <= 0) continue;
+          totals[g] = state.chineseGroupScore(g);
+          counts[g] = (counts[g] ?? 0) + 1;
+        }
+        final groups = totals.keys.toList()..sort();
+        return ListView(
+          padding: _pagePad(context),
+          children: [
+            Text(
+              state.isChineseLessonNow ? '現在是國文課：大屏座位會顯示組別，點同學可以幫他那組加減分' : '國文課時，大屏座位左上角會顯示組別，點同學可以幫他那組加減分',
+              style: TextStyle(fontSize: 15, color: scheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 14),
+            if (groups.isNotEmpty) ...[
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final g in groups)
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 14, 8),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerLowest,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: scheme.outlineVariant, width: AppTokens.hairline),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ChineseGroupBadge(group: g),
+                          const SizedBox(width: 8),
+                          Text('${totals[g]} 分', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+                          Text('（${counts[g]} 人）', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+            ],
+            Row(
+              children: [
+                const Text('同學分組', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: () => _reset(context),
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('分數歸零'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (indexes.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text('還沒有同學名單', style: TextStyle(color: scheme.onSurfaceVariant)),
+              ),
+            for (final i in indexes)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.fromLTRB(14, 6, 10, 6),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: scheme.outlineVariant, width: AppTokens.hairline),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 34,
+                      child: Text(state.seats[i].number, style: const TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                    Expanded(
+                      child: Text(state.seats[i].name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                    DropdownButton<int>(
+                      value: state.seats[i].group.clamp(0, maxGroups),
+                      underline: const SizedBox.shrink(),
+                      items: [
+                        const DropdownMenuItem(value: 0, child: Text('未分組')),
+                        for (var g = 1; g <= maxGroups; g++) DropdownMenuItem(value: g, child: Text('第 $g 組')),
+                      ],
+                      onChanged: (g) {
+                        if (g != null) unawaited(state.setSeatGroup(i, g));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+          ],
         );
       },
     );

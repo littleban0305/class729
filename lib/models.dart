@@ -457,6 +457,10 @@ class SeatData {
   String label;
   String note;
   int score;
+  /// 國文課分組：0 = 未分組，1 以上是第幾組
+  int group;
+  /// 國文課分數（國文課時在詳細資料卡片加減）
+  int chineseScore;
   SeatData({
     required this.number,
     required this.name,
@@ -466,6 +470,8 @@ class SeatData {
     this.label = '',
     this.note = '',
     this.score = 0,
+    this.group = 0,
+    this.chineseScore = 0,
   });
   Map<String, dynamic> toJson() => {
         'number': number,
@@ -476,6 +482,8 @@ class SeatData {
         'label': label,
         'note': note,
         'score': score,
+        'group': group,
+        'chineseScore': chineseScore,
       };
   factory SeatData.fromJson(Map<String, dynamic> json) => SeatData(
         number: json['number'] as String? ?? '',
@@ -486,6 +494,8 @@ class SeatData {
         label: json['label'] as String? ?? '',
         note: json['note'] as String? ?? '',
         score: _coerceInt(json['score'], fallback: 0),
+        group: _coerceInt(json['group'], fallback: 0),
+        chineseScore: _coerceInt(json['chineseScore'], fallback: 0),
       );
 }
 

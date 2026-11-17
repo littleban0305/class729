@@ -28,7 +28,8 @@ import 'main.dart'
         NotificationBell,
         showOfficerPinDialog,
         LessonRatingWatcher,
-        MaterialAutoOpener;
+        MaterialAutoOpener,
+        BigScreenPreviewScope;
 
 /// Decides what a device is allowed to see: an unconfigured device must pick a
 /// role first, a "大屏" device only gets the public classroom interface and attendance, with editable 聯絡簿 as a limited exception.
@@ -143,7 +144,9 @@ class DeviceRoleSetupPage extends StatelessWidget {
 /// Big-screen devices never see teacher admin UI. They expose public classroom pages and a limited editable 聯絡簿.
 class BigScreenDeviceShell extends StatefulWidget {
   final AppState state;
-  const BigScreenDeviceShell({super.key, required this.state});
+  /// 教師後台的大屏預覽：不用 PIN、不會縮小視窗或自動開教材，左上返回鍵回到教師後台
+  final bool preview;
+  const BigScreenDeviceShell({super.key, required this.state, this.preview = false});
 
   @override
   State<BigScreenDeviceShell> createState() => _BigScreenDeviceShellState();
@@ -176,6 +179,10 @@ class _BigScreenDeviceShellState extends State<BigScreenDeviceShell> {
   Future<void> _back() async {
     if (page != BigScreenPages.home) {
       _go(BigScreenPages.home);
+      return;
+    }
+    if (widget.preview) {
+      Navigator.of(context).maybePop();
       return;
     }
     final ok = await showPinEntryDialog(context, widget.state);
@@ -216,8 +223,11 @@ class _BigScreenDeviceShellState extends State<BigScreenDeviceShell> {
 
   @override
   Widget build(BuildContext context) {
+    final preview = widget.preview;
     // 頂端列浮在內容上方，圓角外面露出的是內容本身的底色
-    return Scaffold(
+    return BigScreenPreviewScope(
+      preview: preview,
+      child: Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
       body: SafeArea(
         bottom: false,
@@ -245,15 +255,18 @@ class _BigScreenDeviceShellState extends State<BigScreenDeviceShell> {
                 current: page,
                 onSelect: _go,
                 onBack: _back,
+                backTooltip: preview ? '回到教師後台' : null,
+                showWindowControls: !preview,
+                showSettingsButton: !preview,
                 onOpenSettings: () => showSettingsWindow(context, widget.state),
                 onProject: (text) => setState(() => projectedText = text),
                 notificationButton: NotificationBell(state: widget.state, target: 'bigscreen'),
               ),
             ),
             // 教師評分：下課那一瞬間跳出
-            Positioned.fill(child: LessonRatingWatcher(state: widget.state, bringToFront: true)),
-            // 下課後自動打開下一節的教材資料夾（看不見）
-            Positioned(left: 0, top: 0, child: MaterialAutoOpener(state: widget.state)),
+            Positioned.fill(child: LessonRatingWatcher(state: widget.state, bringToFront: !preview)),
+            // 下課後自動打開下一節的教材資料夾（看不見）；預覽時不開
+            if (!preview) Positioned(left: 0, top: 0, child: MaterialAutoOpener(state: widget.state)),
             // 教師即時通知：蓋在最上層，只有大屏點叉叉或灰色背景才會關
             Positioned.fill(
               child: AnimatedBuilder(
@@ -269,6 +282,7 @@ class _BigScreenDeviceShellState extends State<BigScreenDeviceShell> {
           ],
         ),
       ),
+    ),
     );
   }
 }

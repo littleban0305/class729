@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -48,6 +49,10 @@ class _DeviceRoleGateState extends State<DeviceRoleGate> {
     return AnimatedBuilder(
       animation: widget.state,
       builder: (context, _) {
+        // 網頁版：選好身分後，第一次要先輸入班級代碼（瀏覽器會記住）
+        if (kIsWeb && widget.state.deviceRole.isNotEmpty && widget.state.classId.trim().isEmpty) {
+          return WebTeacherEntry(state: widget.state);
+        }
         switch (widget.state.deviceRole) {
           case 'bigscreen':
             return BigScreenDeviceShell(state: widget.state);
@@ -698,7 +703,11 @@ class _TeacherPinGateState extends State<TeacherPinGate> {
   Future<void> _loadPin() async {
     if (widget.state.cloudSyncEnabled && widget.state.classId.trim().isNotEmpty) {
       try {
-        final result = await widget.state.pullFromCloud();
+        // 最多等 15 秒，連不上就顯示錯誤，不要一直轉圈
+        final result = await widget.state.pullFromCloud().timeout(
+              const Duration(seconds: 15),
+              onTimeout: () => '連線逾時（15 秒）',
+            );
         if (result != null && result != '雲端還沒有這個班級的資料' && mounted) {
           setState(() => _error = '讀取雲端 PIN 碼失敗：$result');
           return;
@@ -787,7 +796,23 @@ class _TeacherPinGateState extends State<TeacherPinGate> {
           ),
         );
       }
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              const Text('正在讀取雲端資料…'),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => widget.state.setDeviceRole(''),
+                child: const Text('返回裝置選擇'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
     if (_unlocked) {
       return MainShell(
@@ -796,6 +821,37 @@ class _TeacherPinGateState extends State<TeacherPinGate> {
     }
     final pinLength = widget.state.bigScreenExitPinLength;
     final creating = pinLength == null;
+    // 網頁版：班級有 PIN 碼（代表班級存在）就直接進教師後台，不用輸入
+    if (kIsWeb && !creating) {
+      return MainShell(
+        state: widget.state,
+      );
+    }
+    // 網頁版不能在這裡建立新的 PIN 碼（避免打錯班級代碼就開了一個空班級）
+    if (kIsWeb && creating) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('找不到班級「${widget.state.classId}」的 PIN 碼',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 10),
+                const Text('請確認班級代碼有沒有打錯，或先在電腦版教師後台設定 PIN 碼。', textAlign: TextAlign.center),
+                const SizedBox(height: 18),
+                FilledButton(
+                  onPressed: () => widget.state.setClassId(''),
+                  child: const Text('重新輸入班級代碼'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final dotCount = pinLength ?? 8;
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
@@ -1043,3 +1099,93 @@ class _CloudDevicePageState extends State<CloudDevicePage> {
     );
   }
 }
+
+/// 網頁版：選好教師後台或大屏之後，第一次要輸入班級代碼（之後記在瀏覽器裡），才連得到同一個班級的資料。
+class WebTeacherEntry extends StatefulWidget {
+  final AppState state;
+  const WebTeacherEntry({super.key, required this.state});
+
+  @override
+  State<WebTeacherEntry> createState() => _WebTeacherEntryState();
+}
+
+class _WebTeacherEntryState extends State<WebTeacherEntry> {
+  final _code = TextEditingController();
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final code = _code.text.trim();
+    if (code.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.state.setClassId(code).timeout(const Duration(seconds: 15));
+    } catch (_) {
+      // 逾時也沒關係，班級代碼已經存好，下一頁會再讀一次並顯示錯誤
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Image.asset('assets/app_icon_729.png', width: 120, height: 120),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(widget.state.deviceRole == 'bigscreen' ? '729 大屏' : '729 教師後台',
+                      textAlign: TextAlign.center, style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _code,
+                    autofocus: true,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 22),
+                    decoration: const InputDecoration(labelText: '班級代碼'),
+                    onSubmitted: (_) => _submit(),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 56,
+                    child: FilledButton(
+                      onPressed: _busy ? null : _submit,
+                      child: Text(_busy ? '連線中…' : '下一步', style: const TextStyle(fontSize: 18)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () => widget.state.setDeviceRole(''),
+                    child: const Text('返回選擇身分'),
+                  ),
+                  if (!widget.state.cloudSyncEnabled) ...[
+                    const SizedBox(height: 14),
+                    Text('雲端連線失敗，請重新整理網頁再試一次',
+                        textAlign: TextAlign.center, style: TextStyle(color: scheme.error)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

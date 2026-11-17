@@ -1,12 +1,12 @@
 {
-    "name": "class_729",
-    "short_name": "class_729",
+    "name": "729 班級軟體",
+    "short_name": "729",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#1628BE",
+    "theme_color": "#1628BE",
+    "description": "729 班級軟體",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

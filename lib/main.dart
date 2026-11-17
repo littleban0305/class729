@@ -350,7 +350,9 @@ class _SevenTwentyNineAppState extends State<SevenTwentyNineApp> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!kIsWeb && Platform.isWindows) {
+      if (kIsWeb) {
+        // 網頁版：重新整理網頁就是最新版，不用檢查更新
+      } else if (Platform.isWindows) {
         // Windows：打開時自動檢查 GitHub Releases，有新版就自動下載、更新、重開
         checkWindowsUpdate();
       } else {
@@ -429,6 +431,8 @@ class _AppBackdrop extends StatelessWidget {
 }
 
 Future<bool> showPinEntryDialog(BuildContext context, AppState state) async {
+  // 網頁版不會放在大屏上，不用 PIN 碼
+  if (kIsWeb) return true;
   final pinLength = state.bigScreenExitPinLength;
   if (pinLength == null || pinLength < 4 || pinLength > 8) return false;
   return await showDialog<bool>(
@@ -440,6 +444,8 @@ Future<bool> showPinEntryDialog(BuildContext context, AppState state) async {
 
 /// 管理者 PIN 碼：進入大屏蓋章頁前輸入。還沒設定幹部 PIN 碼時直接通過。
 Future<bool> showOfficerPinDialog(BuildContext context, AppState state) async {
+  // 網頁版不會放在大屏上，不用 PIN 碼
+  if (kIsWeb) return true;
   final pinLength = state.officerPinLength;
   if (pinLength == null || pinLength < 4 || pinLength > 8) return true;
   return await showDialog<bool>(
@@ -659,8 +665,9 @@ class _MainShellState extends State<MainShell> {
 
   void _selectPage(int value) => setState(() => page = value);
 
+  // 教師後台開設定不用再輸入 PIN 碼（進後台時已經輸入過）
   Future<void> _openSettings() async {
-    await showSettingsWindow(
+    await showSettingsWindowAfterPin(
       context,
       widget.state,
     );
@@ -673,42 +680,60 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.sizeOf(context).width < 720;
+    final scheme = Theme.of(context).colorScheme;
+    Widget navIconOf(Object icon, {bool selected = false}) => icon is String
+        ? AppIcon(icon, size: 24, color: selected ? AppTokens.ink : scheme.onSurfaceVariant)
+        : Icon(icon as IconData, size: 24, color: selected ? AppTokens.ink : scheme.onSurfaceVariant);
     return Scaffold(
-      drawer: isMobile
-          ? TeacherMobileDrawer(
-              labels: _labels,
-              icons: _icons,
-              groups: _groups,
-              current: page,
-              onSelect: _selectPage,
-              extraItems: [
-                ListTile(
-                  leading: const Icon(Icons.settings_outlined),
-                  title: const Text('資訊與設定'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _openSettings();
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.logout_outlined),
-                  title: const Text('退出'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await _exitTeacher();
-                  },
-                ),
+      backgroundColor: isMobile ? scheme.surfaceContainer : null,
+      // 手機版：導覽列固定在最下面，跟電腦版同樣 6 大頁
+      bottomNavigationBar: isMobile
+          ? NavigationBar(
+              height: 68,
+              backgroundColor: scheme.surfaceContainerLowest,
+              indicatorColor: AppTokens.accent,
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+              selectedIndex: _navOrder.indexOf(page).clamp(0, _navOrder.length - 1),
+              onDestinationSelected: (i) => _selectPage(_navOrder[i]),
+              destinations: [
+                for (final i in _navOrder)
+                  NavigationDestination(
+                    icon: navIconOf(_icons[i]),
+                    selectedIcon: navIconOf(_icons[i], selected: true),
+                    label: _labels[i],
+                  ),
               ],
             )
           : null,
       body: isMobile
           ? SafeArea(
-              top: true,
               bottom: false,
-              child: Stack(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Positioned.fill(
-                    top: 10,
+                  // 右上角：通知、設定、退出
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 4, 0),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        Image.asset('assets/app_icon_729.png', width: 30, height: 30),
+                        const Spacer(),
+                        NotificationBell(state: widget.state, target: 'teacher'),
+                        IconButton(
+                          tooltip: '資訊與設定',
+                          onPressed: _openSettings,
+                          icon: const Icon(Icons.settings_outlined),
+                        ),
+                        IconButton(
+                          tooltip: '退出教師後台',
+                          onPressed: _exitTeacher,
+                          icon: const Icon(Icons.logout_outlined),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
                     child: AnimatedBuilder(
                       animation: widget.state,
                       builder: (_, __) => KeyedSubtree(
@@ -717,16 +742,6 @@ class _MainShellState extends State<MainShell> {
                           state: widget.state,
                           page: page,
                         ),
-                      ),
-                    ),
-                  ),
-                  AutoHideBar(
-                    child: Builder(
-                      builder: (barContext) => WindowBar(
-                        title: '後台',
-                        mobile: isMobile,
-                        onOpenMenu: () => Scaffold.of(barContext).openDrawer(),
-                        onOpenSettings: _openSettings,
                       ),
                     ),
                   ),
@@ -5768,7 +5783,7 @@ class _EditableListPageState extends State<_EditableListPage> {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.all(24),
+        padding: _pagePad(context),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -6209,7 +6224,7 @@ class _SeatAdminPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: _pagePad(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -6375,7 +6390,7 @@ class _DataTransferPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: _pagePad(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -7111,7 +7126,7 @@ class BigScreenTopBar extends StatelessWidget {
                         onPressed: onOpenSettings,
                         icon: const Icon(Icons.settings_outlined),
                       ),
-                    if (showWindowControls) const AppWindowControls(),
+                    if (showWindowControls && isDesktopPlatform) const AppWindowControls(),
                   ],
                 ),
               ),
@@ -8986,7 +9001,7 @@ class _TeacherNoticePageState extends State<TeacherNoticePage> {
     final italic = ctrl.all((s) => s.italic);
     final underline = ctrl.all((s) => s.underline);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      padding: _isPhone(context) ? const EdgeInsets.fromLTRB(12, 12, 12, 24) : const EdgeInsets.fromLTRB(24, 20, 24, 32),
       children: [
         // 格式工具列：算在輸入框「裡面」，點了不會讓選取消失
         TextFieldTapRegion(
@@ -9046,7 +9061,9 @@ class _TeacherNoticePageState extends State<TeacherNoticePage> {
         // 大輸入框（直接用大屏的格式顯示）
         Container(
           constraints: const BoxConstraints(minHeight: 320),
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+          padding: _isPhone(context)
+              ? const EdgeInsets.symmetric(horizontal: 14, vertical: 12)
+              : const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
           decoration: BoxDecoration(
             color: scheme.surfaceContainerLowest,
             borderRadius: BorderRadius.circular(24),
@@ -9069,25 +9086,25 @@ class _TeacherNoticePageState extends State<TeacherNoticePage> {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             FilledButton.icon(
               onPressed: sending || ctrl.text.trim().isEmpty ? null : _send,
               icon: const Icon(Icons.send_rounded),
               label: const Text('傳送到大屏'),
             ),
-            const SizedBox(width: 12),
             OutlinedButton(
               onPressed: live == null ? null : _recall,
               child: const Text('收回通知'),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                live == null ? '目前沒有通知' : '大屏顯示中：${live.text.split('\n').first}',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
+            Text(
+              live == null ? '目前沒有通知' : '大屏顯示中：${live.text.split('\n').first}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -9468,6 +9485,14 @@ class _RewardRedeemPageState extends State<RewardRedeemPage> {
   }
 }
 
+// ───────────────────────── 手機版排版小工具 ─────────────────────────
+
+/// 寬度 < 600 視為手機
+bool _isPhone(BuildContext context) => MediaQuery.sizeOf(context).width < 600;
+
+/// 教師後台頁面外距：手機 12、電腦 24
+EdgeInsets _pagePad(BuildContext context) => EdgeInsets.all(_isPhone(context) ? 12 : 24);
+
 // ───────────────────────── 教師後台：懲罰與獎勵管理 ─────────────────────────
 
 class PunishRewardAdminPage extends StatefulWidget {
@@ -9566,7 +9591,7 @@ class _PunishRewardAdminPageState extends State<PunishRewardAdminPage> {
   Widget _section({required String title, required Widget adder, required List<Widget> rows}) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(_isPhone(context) ? 14 : 20),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(24),
@@ -9641,30 +9666,45 @@ class _PunishRewardAdminPageState extends State<PunishRewardAdminPage> {
                   () => state.savePunishments([...state.punishments]..removeAt(i))),
           ],
         );
+        final phone = _isPhone(context);
+        final costStepper = <Widget>[
+          IconButton(
+            tooltip: '少一章',
+            onPressed: newCost <= 0 ? null : () => setState(() => newCost--),
+            icon: const Icon(Icons.remove),
+          ),
+          SizedBox(
+            width: 56,
+            child: Text('$newCost 章', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          IconButton(tooltip: '多一章', onPressed: () => setState(() => newCost++), icon: const Icon(Icons.add)),
+          const SizedBox(width: 6),
+          FilledButton(onPressed: _addReward, child: const Text('新增')),
+        ];
+        final rewardField = TextField(
+          controller: rewardCtrl,
+          decoration: const InputDecoration(hintText: '獎勵名稱，例如：免寫一次作業'),
+          onSubmitted: (_) => _addReward(),
+        );
         final reward = _section(
           title: '兌換獎勵',
-          adder: Row(
+          // 手機：名稱一行，章數＋新增一行
+          adder: phone
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    rewardField,
+                    const SizedBox(height: 8),
+                    Row(mainAxisAlignment: MainAxisAlignment.end, children: costStepper),
+                  ],
+                )
+              : Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: rewardCtrl,
-                  decoration: const InputDecoration(hintText: '獎勵名稱，例如：免寫一次作業'),
-                  onSubmitted: (_) => _addReward(),
-                ),
+                child: rewardField,
               ),
               const SizedBox(width: 10),
-              IconButton(
-                tooltip: '少一章',
-                onPressed: newCost <= 0 ? null : () => setState(() => newCost--),
-                icon: const Icon(Icons.remove),
-              ),
-              SizedBox(
-                width: 56,
-                child: Text('$newCost 章', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
-              IconButton(tooltip: '多一章', onPressed: () => setState(() => newCost++), icon: const Icon(Icons.add)),
-              const SizedBox(width: 6),
-              FilledButton(onPressed: _addReward, child: const Text('新增')),
+              ...costStepper,
             ],
           ),
           rows: [
@@ -9676,7 +9716,7 @@ class _PunishRewardAdminPageState extends State<PunishRewardAdminPage> {
         return LayoutBuilder(builder: (context, c) {
           final wide = c.maxWidth >= 980;
           return ListView(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+            padding: _isPhone(context) ? const EdgeInsets.fromLTRB(12, 12, 12, 24) : const EdgeInsets.fromLTRB(24, 20, 24, 32),
             children: [
               if (wide)
                 Row(
@@ -9992,15 +10032,28 @@ class _AdminSectionState extends State<AdminSection> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(mobile ? 12 : 8, mobile ? 52 : 0, mobile ? 12 : 0, 16),
-          child: Row(
-            children: [
-              Text(widget.title,
-                  style: TextStyle(fontSize: mobile ? 26 : 34, fontWeight: FontWeight.w900, color: scheme.onSurface)),
-              const SizedBox(width: 12),
-              Expanded(child: Align(alignment: Alignment.centerRight, child: tabBar)),
-            ],
-          ),
+          padding: EdgeInsets.fromLTRB(mobile ? 12 : 8, 0, mobile ? 12 : 0, mobile ? 10 : 16),
+          child: mobile
+              // 手機：標題一行、分頁標籤另一行（可左右滑），不會擠在一起
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.title,
+                        style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: scheme.onSurface)),
+                    if (tabs.length > 1) ...[
+                      const SizedBox(height: 8),
+                      Transform.translate(offset: const Offset(-8, 0), child: tabBar),
+                    ],
+                  ],
+                )
+              : Row(
+                  children: [
+                    Text(widget.title,
+                        style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, color: scheme.onSurface)),
+                    const SizedBox(width: 12),
+                    Expanded(child: Align(alignment: Alignment.centerRight, child: tabBar)),
+                  ],
+                ),
         ),
         Expanded(
           child: widget.tint == null
@@ -10067,8 +10120,82 @@ class StudentAdminPage extends StatelessWidget {
         const head = TextStyle(fontSize: 14, fontWeight: FontWeight.w800);
         Widget cell(double? w, Widget child) => w == null ? Expanded(child: child) : SizedBox(width: w, child: child);
 
+        final mobile = MediaQuery.sizeOf(context).width < 720;
+        if (mobile) {
+          // 手機：每位同學一張卡片，不用寬表格
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+            children: [
+              Row(
+                children: [
+                  FilledButton.icon(
+                    onPressed: () => _add(context),
+                    icon: const Icon(Icons.person_add_alt_1_outlined),
+                    label: const Text('新增學生'),
+                  ),
+                  const Spacer(),
+                  Text('$named 人（男 $boys／女 $girls）',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (final i in order)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: state.seats[i].gender == '男'
+                        ? AppTokens.seatBoy(isDark)
+                        : state.seats[i].gender == '女'
+                            ? AppTokens.seatGirl(isDark)
+                            : scheme.surfaceContainerLowest,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: scheme.outlineVariant, width: AppTokens.hairline),
+                    ),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => _editSeat(context, state, i, true),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 40,
+                              child: Text(state.seats[i].number,
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                            ),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(state.seats[i].name.trim().isEmpty ? '空位' : state.seats[i].name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                                  if (state.seats[i].label.isNotEmpty || state.seats[i].note.isNotEmpty)
+                                    Text(
+                                      [state.seats[i].label, state.seats[i].note].where((e) => e.isNotEmpty).join('・'),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Text('${state.seats[i].score} 章', style: const TextStyle(fontWeight: FontWeight.w800)),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right, size: 20),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        }
         return Padding(
-          padding: const EdgeInsets.all(24),
+          padding: _pagePad(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -10259,11 +10386,44 @@ class _DiaryAdminPageState extends State<DiaryAdminPage> {
         final isToday = key == _key(DateTime.now());
 
         return Padding(
-          padding: const EdgeInsets.all(24),
+          padding: _pagePad(context),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 日期切換
+              // 日期切換（手機：日期一行，回到今天＋項數一行）
+              if (_isPhone(context)) ...[
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: '前一天',
+                      onPressed: () => setState(() => date = date.subtract(const Duration(days: 1))),
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    Expanded(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('${date.month} 月 ${date.day} 日　星期${_weekdays[date.weekday - 1]}',
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '後一天',
+                      onPressed: () => setState(() => date = date.add(const Duration(days: 1))),
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    if (!isToday)
+                      OutlinedButton(onPressed: () => setState(() => date = DateTime.now()), child: const Text('回到今天')),
+                    const Spacer(),
+                    Text('${day.length} 項',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ] else
               Row(
                 children: [
                   IconButton(
@@ -11184,7 +11344,7 @@ class _RatingRecordsPageState extends State<RatingRecordsPage> {
         final dates = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
 
         return ListView(
-          padding: const EdgeInsets.all(24),
+          padding: _pagePad(context),
           children: [
             // 總平均＋各科平均
             Wrap(
@@ -11446,11 +11606,138 @@ class _MaterialAdminPageState extends State<MaterialAdminPage> {
     _changed();
   }
 
+  Widget _materialField(int i, TextEditingController c, String hint, {String? label, double? fontSize}) => TextField(
+        controller: c,
+        onChanged: (_) => _changed(),
+        style: fontSize == null ? null : TextStyle(fontSize: fontSize),
+        decoration: InputDecoration(isDense: true, hintText: hint, labelText: label),
+      );
+
+  Widget _materialActions(int i) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '打開看看',
+            onPressed: () async {
+              final ok = await openMaterialFolder(rows[i].path.text);
+              if (!ok && mounted) {
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text('打不開：這台電腦可能連不到學校的伺服器')));
+              }
+            },
+            icon: const Icon(Icons.folder_open_outlined, size: 20),
+          ),
+          IconButton(
+            tooltip: '刪除',
+            onPressed: () {
+              rows.removeAt(i).dispose();
+              _changed();
+            },
+            icon: const Icon(Icons.delete_outline, size: 20),
+          ),
+        ],
+      );
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final phone = _isPhone(context);
+    final delayStepper = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton.outlined(
+          onPressed: delay <= 0
+              ? null
+              : () {
+                  delay--;
+                  _changed();
+                },
+          icon: const Icon(Icons.remove),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text('$delay',
+              textAlign: TextAlign.center, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+        ),
+        IconButton.outlined(
+          onPressed: delay >= 30
+              ? null
+              : () {
+                  delay++;
+                  _changed();
+                },
+          icon: const Icon(Icons.add),
+        ),
+      ],
+    );
+    final topButtons = <Widget>[
+      OutlinedButton.icon(
+        onPressed: _resetDefaults,
+        icon: const Icon(Icons.restore),
+        label: const Text('恢復預設'),
+      ),
+      const SizedBox(width: 8),
+      FilledButton.icon(
+        onPressed: () {
+          setState(() => rows.add(_MaterialRow(MaterialFolder(name: '', keywords: '', path: ''))));
+        },
+        icon: const Icon(Icons.add),
+        label: const Text('新增'),
+      ),
+    ];
+    if (phone) {
+      return ListView(
+        padding: _pagePad(context),
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text('下課後', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              delayStepper,
+              const Text('分鐘，自動打開下一節的教材', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: topButtons),
+          const SizedBox(height: 12),
+          for (var i = 0; i < rows.length; i++)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outlineVariant, width: AppTokens.hairline),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: _materialField(i, rows[i].name, '名稱', label: '名稱')),
+                      _materialActions(i),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _materialField(i, rows[i].keywords, '例如：英語,英文', label: '課表科目（用逗號分開）'),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _materialField(i, rows[i].path, r'\\伺服器\資料夾', label: '資料夾路徑', fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: _pagePad(context),
       children: [
         Row(
           children: [
@@ -11739,16 +12026,23 @@ class _ChromeAdminPageState extends State<ChromeAdminPage> {
     return width == null ? Expanded(child: f) : SizedBox(width: width, child: f);
   }
 
+  Widget _phoneField(TextEditingController c, String hint, String label) => TextField(
+        controller: c,
+        onChanged: (_) => _changed(),
+        decoration: InputDecoration(isDense: true, hintText: hint, labelText: label),
+      );
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     const step = TextStyle(fontSize: 15, height: 1.6, color: AppTokens.ink);
+    final phone = _isPhone(context);
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: _pagePad(context),
       children: [
         // 教學
         Container(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(phone ? 14 : 20),
           decoration: BoxDecoration(
             color: const Color(0xFFDCEBFF),
             borderRadius: BorderRadius.circular(24),
@@ -11782,6 +12076,7 @@ class _ChromeAdminPageState extends State<ChromeAdminPage> {
           ],
         ),
         const SizedBox(height: 12),
+        if (!phone)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
@@ -11809,6 +12104,55 @@ class _ChromeAdminPageState extends State<ChromeAdminPage> {
             child: Text('還沒有 Chrome 使用者', textAlign: TextAlign.center, style: TextStyle(color: scheme.onSurfaceVariant)),
           ),
         for (var i = 0; i < rows.length; i++)
+          if (phone)
+            // 手機：欄位直排，按鈕放在名稱旁邊
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outlineVariant, width: AppTokens.hairline),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: _phoneField(rows[i].name, '例如：數學老師', '顯示名稱')),
+                      IconButton(
+                        tooltip: '試開看看',
+                        onPressed: () async {
+                          final ok = await openChromeProfile(rows[i].value);
+                          if (!ok && context.mounted) {
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(const SnackBar(content: Text('打不開：請確認有填設定檔名稱、這台電腦有 Chrome')));
+                          }
+                        },
+                        icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                      ),
+                      IconButton(
+                        tooltip: '刪除',
+                        onPressed: () {
+                          rows.removeAt(i).dispose();
+                          _changed();
+                        },
+                        icon: const Icon(Icons.delete_outline, size: 20),
+                      ),
+                    ],
+                  ),
+                  for (final f in [
+                    _phoneField(rows[i].dir, 'Profile 1', '設定檔名稱'),
+                    _phoneField(rows[i].url, 'https://…', '網址（可不填）'),
+                    _phoneField(rows[i].keywords, '例如：數學', '課表科目（可不填）'),
+                  ]) ...[
+                    const SizedBox(height: 8),
+                    Padding(padding: const EdgeInsets.only(right: 8), child: f),
+                  ],
+                ],
+              ),
+            )
+          else
           Container(
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.fromLTRB(16, 8, 6, 8),
@@ -12112,7 +12456,7 @@ class _PolicyAdminPageState extends State<PolicyAdminPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: _pagePad(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

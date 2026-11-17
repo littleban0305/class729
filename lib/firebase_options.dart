@@ -15,12 +15,8 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, Tar
 /// ```
 class DefaultFirebaseOptions {
   static FirebaseOptions forPlatform(TargetPlatform platform) {
-    if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
-    }
+    // 網頁版（教師後台網站）：Windows 版本來就是用 Firebase 的「網頁應用程式」設定，直接共用
+    if (kIsWeb) return windows;
     switch (platform) {
       case TargetPlatform.android:
         return android;

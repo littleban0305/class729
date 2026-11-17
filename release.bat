@@ -7,6 +7,8 @@ git push
 if errorlevel 1 goto pushfail
 echo [729] 2/2 Build and publish release (pack.bat)...
 call "%~dp0pack.bat"
+echo [729] Also update the teacher website...
+call "%~dp0web.bat"
 exit /b 0
 
 :pushfail
@@ -14,4 +16,6 @@ echo PUSH FAILED. Copy the message above and send it to Claude.
 echo (If it says "nothing to commit", that is fine - continuing to release.)
 pause
 call "%~dp0pack.bat"
+echo [729] Also update the teacher website...
+call "%~dp0web.bat"
 exit /b 0

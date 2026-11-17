@@ -6877,9 +6877,23 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
       ),
     );
 
-    // 國文課：黃色按鈕下面顯示小組排行榜
+    // 國文課：黃色按鈕下面多一個「排行榜」按鈕，按了跳出小組排行榜
     final showBoard = widget.state.isChineseLessonNow && widget.state.seats.any((s) => s.group > 0);
-    final board = showBoard ? ChineseLeaderboard(state: widget.state) : const SizedBox.shrink();
+    final boardButton = SizedBox(
+      width: 420,
+      height: 72,
+      child: OutlinedButton.icon(
+        onPressed: () => showChineseLeaderboard(context, widget.state),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: scheme.surfaceContainerLowest,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
+          side: BorderSide(color: scheme.outline, width: AppTokens.hairline),
+          textStyle: const TextStyle(fontSize: 26),
+        ),
+        icon: const Icon(Icons.emoji_events_outlined, size: 30),
+        label: const Text('排行榜'),
+      ),
+    );
 
     Widget roundButton(Object icon, String label, Widget Function()? page, {VoidCallback? onTap}) => Column(
           mainAxisSize: MainAxisSize.min,
@@ -6931,7 +6945,7 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
                 lesson,
                 const SizedBox(height: 20),
                 Center(child: startButton),
-                if (showBoard) ...[const SizedBox(height: 20), FittedBox(fit: BoxFit.scaleDown, child: board)],
+                if (showBoard) ...[const SizedBox(height: 14), Center(child: boardButton)],
                 const SizedBox(height: 24),
                 SizedBox(height: 520, child: seats),
                 const SizedBox(height: 24),
@@ -6952,17 +6966,16 @@ class _BigScreenHomePageState extends State<BigScreenHomePage> {
                     fit: BoxFit.scaleDown,
                     child: SizedBox(
                       width: 760,
-                      // 有排行榜時版面變高，FittedBox 會自動縮小放得下
-                      height: showBoard ? 1000 + ChineseLeaderboard.heightFor(widget.state) : 1000,
+                      height: 1000,
                       child: Column(
                         children: [
                           const Spacer(flex: 3),
                           clock,
-                          SizedBox(height: showBoard ? 32 : 56),
+                          const SizedBox(height: 56),
                           lesson,
-                          SizedBox(height: showBoard ? 40 : 72),
+                          const SizedBox(height: 72),
                           startButton,
-                          if (showBoard) ...[const SizedBox(height: 28), board],
+                          if (showBoard) ...[const SizedBox(height: 18), boardButton],
                           const Spacer(flex: 2),
                           shortcuts,
                           const SizedBox(height: 90),
@@ -7163,7 +7176,36 @@ const chineseGroupColors = [
   Color(0xFFE8E8E8),
 ];
 
-/// 國文課小組排行榜（大屏首頁黃色按鈕下面）
+/// 跳出國文小組排行榜視窗（分數變了會即時更新）
+Future<void> showChineseLeaderboard(BuildContext context, AppState state) {
+  return showDialog<void>(
+    context: context,
+    builder: (c) => Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedBuilder(
+            animation: state,
+            builder: (_, __) => FittedBox(fit: BoxFit.scaleDown, child: ChineseLeaderboard(state: state)),
+          ),
+          Positioned(
+            right: 8,
+            top: 8,
+            child: IconButton(
+              tooltip: '關閉',
+              onPressed: () => Navigator.pop(c),
+              icon: const Icon(Icons.close, size: 28),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// 國文課小組排行榜（大屏首頁「排行榜」按鈕跳出的視窗）
 class ChineseLeaderboard extends StatelessWidget {
   final AppState state;
   const ChineseLeaderboard({super.key, required this.state});
@@ -7179,7 +7221,6 @@ class ChineseLeaderboard extends StatelessWidget {
     return list;
   }
 
-  static double heightFor(AppState state) => _headerHeight + ranking(state).length * (_rowHeight + 6) + 40;
 
   @override
   Widget build(BuildContext context) {
